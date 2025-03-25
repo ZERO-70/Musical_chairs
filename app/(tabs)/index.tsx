@@ -1,74 +1,165 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ImageBackground,
+  Animated,
+} from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+export default function WelcomeScreen() {
+  const router = useRouter();
+  const colorAnimation = useRef(new Animated.Value(0)).current;
 
-export default function HomeScreen() {
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(colorAnimation, {
+        toValue: 3,
+        duration: 7000,
+        useNativeDriver: false,
+      })
+    ).start();
+  }, [colorAnimation]);
+
+  const animatedColor = colorAnimation.interpolate({
+    inputRange: [0, 1, 2, 3],
+    outputRange: ['rgb(255, 20, 20)', 'rgb(149, 0, 255)', 'rgb(255, 221, 0)', 'rgb(255,105,180)'],
+  });
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12'
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <ImageBackground
+      source={{
+        uri: 'https://api.a0.dev/assets/image?text=musical%20chairs%20game%20neon%20party%20background&aspect=9:16',
+      }}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <View style={styles.overlay}>
+        <View style={styles.content}>
+          <Animated.Text style={[styles.title, { color: animatedColor }]}>
+            MUSICAL CHAIRS
+          </Animated.Text>
+          <Text style={styles.subtitle}>Are You Ready to Party?</Text>
+
+          <TouchableOpacity
+            style={styles.playButton}
+            onPress={() => router.push('/CameraScreen')}
+          >
+            <MaterialIcons
+              name="play-circle-filled"
+              size={40}
+              color="#fff"
+            />
+            <Text style={styles.buttonText}>START GAME</Text>
+          </TouchableOpacity>
+
+          <View style={styles.instructionsContainer}>
+            <Text style={styles.instructionsTitle}>How to Play</Text>
+            <Text style={styles.instructionsText}>• Set up chairs in a circle</Text>
+            <Text style={styles.instructionsText}>• Choose a funky track</Text>
+            <Text style={styles.instructionsText}>
+              • Dance as long as the music plays
+            </Text>
+            <Text style={styles.instructionsText}>• Sit fast when it stops!</Text>
+          </View>
+        </View>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  container: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    paddingHorizontal: 20,
   },
-  stepContainer: {
-    gap: 8,
+  content: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 48,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 10,
+    letterSpacing: 4,
+    textShadowColor: 'black',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  subtitle: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: 'rgb(255, 255, 255)',
+    marginBottom: 30,
+    textAlign: 'center',
+    textShadowColor: 'yellow',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 20,
+  },
+  playButton: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 20, 20, 0.7)',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 50,
+    alignItems: 'center',
+    marginBottom: 40,
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#ff1493',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 10,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 1,
+    textShadowColor: '#ff1493',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5,
+  },
+  instructionsContainer: {
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    padding: 20,
+    borderRadius: 15,
+    width: '100%',
+    maxWidth: 320,
+  },
+  instructionsTitle: {
+    color: '#ff69b4',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+    letterSpacing: 1,
+    textShadowColor: '#ff69b4',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5,
+  },
+  instructionsText: {
+    color: '#fff',
+    fontSize: 16,
     marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+    lineHeight: 24,
+    letterSpacing: 0.5,
+    textShadowColor: '#000',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 3,
   },
 });
+
+export { WelcomeScreen };
