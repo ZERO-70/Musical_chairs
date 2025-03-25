@@ -14,6 +14,30 @@ import { Audio, Video } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 
+// Custom hook to manage timeouts.
+function useTimeoutManager() {
+  const timeoutIds = useRef<number[]>([]);
+
+  const setManagedTimeout = (callback: () => void, delay: number) => {
+    const id = setTimeout(callback, delay);
+    timeoutIds.current.push(id);
+    return id;
+  };
+
+  const clearAllTimeouts = () => {
+    timeoutIds.current.forEach(clearTimeout);
+    timeoutIds.current = [];
+  };
+
+  useEffect(() => {
+    return () => {
+      clearAllTimeouts();
+    };
+  }, []);
+
+  return { setManagedTimeout, clearAllTimeouts };
+}
+
 const ITEM_HEIGHT = 80;
 const ITEM_MARGIN = 10;
 const SNAP_INTERVAL = ITEM_HEIGHT + ITEM_MARGIN * 2;
@@ -21,6 +45,7 @@ const SNAP_INTERVAL = ITEM_HEIGHT + ITEM_MARGIN * 2;
 export default function CameraScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
+  const { setManagedTimeout, clearAllTimeouts } = useTimeoutManager();
   // Ref to hold the music instance.
   const soundRef = useRef<Audio.Sound | null>(null);
   // Ref to store the current playback position (in milliseconds)
@@ -41,7 +66,7 @@ export default function CameraScreen() {
   // State for showing the intro video.
   const [showIntroVideo, setShowIntroVideo] = useState<boolean>(true);
 
-  // Reference for the vertical ScrollView
+  // Reference for the vertical ScrollView.
   const scrollViewRef = useRef<ScrollView>(null);
 
   // Helper: Wait for a sound to finish playing.
@@ -95,8 +120,10 @@ export default function CameraScreen() {
         soundRef.current = newSound;
         console.log("Playing new music...");
       }
+      // Always schedule the next random stop.
       const randomDelay = Math.floor(Math.random() * 10000) + 10000;
-      setTimeout(randomStop, randomDelay);
+      console.log("Scheduling random stop in", randomDelay, "ms");
+      setManagedTimeout(randomStop, randomDelay);
     } catch (error) {
       console.error("Error playing music:", error);
     }
@@ -113,11 +140,10 @@ export default function CameraScreen() {
       console.log("Pausing music...");
       await soundRef.current.pauseAsync();
     }
-    setTimeout(startSettleCountdown, 500);
+    setManagedTimeout(startSettleCountdown, 500);
   }
 
   function startSettleCountdown() {
-    // Clear any existing interval.
     setCountdown(10);
     let count = 10;
     const interval = setInterval(() => {
@@ -125,18 +151,16 @@ export default function CameraScreen() {
       if (count < 0) {
         clearInterval(interval);
         setCountdown(null);
-        // Deduct one chair if possible. If only one remains, game over.
+        // When countdown finishes, deduct a chair.
         if (selectedNumber <= 1) {
-          // Deducting the last chair triggers game over.
           setSelectedNumber(0);
           setGameOver(true);
-          // Display winner message for 5 seconds then reset.
-          setTimeout(() => {
+          // Show winner overlay for 5 seconds, then reset the game.
+          setManagedTimeout(() => {
             resetGame();
           }, 5000);
         } else {
           setSelectedNumber((prev) => prev - 1);
-          // Continue with warning sound and resume music.
           (async () => {
             console.log("Countdown finished. Playing warning sound...");
             setShowWarning(true);
@@ -152,6 +176,9 @@ export default function CameraScreen() {
               if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
                 await soundRef.current.playAsync();
                 console.log("Music resumed.");
+                // Schedule the next random stop after resuming.
+                const randomDelay = Math.floor(Math.random() * 10000) + 10000;
+                setManagedTimeout(randomStop, randomDelay);
               } else {
                 console.log("Music is either not loaded or already playing.");
               }
@@ -168,6 +195,8 @@ export default function CameraScreen() {
               soundRef.current = newSound;
               await newSound.playAsync();
               console.log("Music recreated and resumed.");
+              const randomDelay = Math.floor(Math.random() * 10000) + 10000;
+              setManagedTimeout(randomStop, randomDelay);
             }
           })();
         }
@@ -178,7 +207,7 @@ export default function CameraScreen() {
     }, 1000);
   }
 
-  // Recursive animation for countdown display.
+  // Recursive animation for the countdown display.
   const animateCountdown = () => {
     fadeAnim.setValue(1);
     scaleAnim.setValue(1);
@@ -196,7 +225,7 @@ export default function CameraScreen() {
     ]).start();
   };
 
-  // Starts the game countdown (5 seconds) after a number is selected.
+  // Game countdown (5 seconds) after a number is selected.
   const startGameCountdown = () => {
     let count = 5;
     setCountdown(count);
@@ -216,7 +245,6 @@ export default function CameraScreen() {
 
   const handleStartCancel = () => {
     if (isActive) {
-      // Cancel game.
       setCountdown(null);
       if (soundRef.current) {
         console.log("Cancelling game: stopping and unloading music.");
@@ -226,10 +254,9 @@ export default function CameraScreen() {
       }
       setIsActive(false);
       setShowNumberSelector(false);
+      clearAllTimeouts();
     } else {
-      // Start game.
       setIsActive(true);
-      // Show number selector overlay. Game countdown will start after a number is selected.
       setShowNumberSelector(true);
     }
   };
@@ -239,13 +266,12 @@ export default function CameraScreen() {
   };
 
   const resetGame = () => {
-    // Reset game state.
     setIsActive(false);
     setShowNumberSelector(false);
     setCountdown(null);
     setGameOver(false);
-    // Optionally, reset selectedNumber to an initial value.
     setSelectedNumber(1);
+    clearAllTimeouts();
   };
 
   useFocusEffect(
@@ -257,6 +283,7 @@ export default function CameraScreen() {
           soundRef.current.unloadAsync();
           soundRef.current = null;
         }
+        clearAllTimeouts();
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
         router.replace("/");
       };
@@ -457,7 +484,7 @@ const styles = StyleSheet.create({
     left: "50%",
     transform: [{ translateX: -50 }, { translateY: -50 }],
   },
-  countdownText: { fontSize: 120, fontWeight: "bold", color: "rgba(255, 255, 255, 0.8)", textAlign: "center" },
+  countdownText: { fontSize: 120, fontWeight: "bold", color: "rgba(255,255,255,0.8)", textAlign: "center" },
   warningContainer: {
     position: "absolute",
     top: "50%",
@@ -509,19 +536,9 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  chairIcon: {
-    width: 30,
-    height: 30,
-    marginRight: 8,
-  },
+  chairIcon: { width: 30, height: 30, marginRight: 8},
   selectedNumberText: { fontSize: 24, color: "black", fontWeight: "bold" },
-  downArrowIcon: {
-    width: 30,
-    height: 30,
-    alignSelf: "center",
-    marginTop: 10,
-    tintColor: "white",
-  },
+  downArrowIcon: { width: 30, height: 30, alignSelf: "center", marginTop: 10, tintColor: "white" },
   gameOverOverlay: {
     position: "absolute",
     top: 0,
@@ -533,10 +550,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 100,
   },
-  gameOverText: {
-    fontSize: 32,
-    color: "white",
-    fontWeight: "bold",
-  },
+  gameOverText: { fontSize: 32, color: "white", fontWeight: "bold" },
 });
-
