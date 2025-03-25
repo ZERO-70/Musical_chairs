@@ -33,8 +33,9 @@ export default function CameraScreen() {
   const [showNumberSelector, setShowNumberSelector] = useState<boolean>(false);
   // The selected number (number of chairs)
   const [selectedNumber, setSelectedNumber] = useState<number>(1);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const randomStopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // State for game over (when chairs reach zero)
+  const [gameOver, setGameOver] = useState<boolean>(false);
+  // Animated values for countdown
   const fadeAnim = new Animated.Value(1);
   const scaleAnim = new Animated.Value(1);
   // State for showing the intro video.
@@ -64,11 +65,7 @@ export default function CameraScreen() {
   useEffect(() => {
     async function requestAudioPermissions() {
       const { status } = await Audio.requestPermissionsAsync();
-      if (status !== "granted") {
-        console.log("Audio permission denied");
-      } else {
-        console.log("Audio permission granted");
-      }
+      console.log(status !== "granted" ? "Audio permission denied" : "Audio permission granted");
     }
     requestAudioPermissions();
   }, []);
@@ -92,16 +89,14 @@ export default function CameraScreen() {
           { shouldPlay: true }
         );
         if (playbackPositionRef.current > 0) {
-          await newSound.setStatusAsync({
-            positionMillis: playbackPositionRef.current,
-          });
+          await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
           console.log("Restored playback position:", playbackPositionRef.current);
         }
         soundRef.current = newSound;
         console.log("Playing new music...");
       }
       const randomDelay = Math.floor(Math.random() * 10000) + 10000;
-      randomStopTimeoutRef.current = setTimeout(randomStop, randomDelay);
+      setTimeout(randomStop, randomDelay);
     } catch (error) {
       console.error("Error playing music:", error);
     }
@@ -118,60 +113,64 @@ export default function CameraScreen() {
       console.log("Pausing music...");
       await soundRef.current.pauseAsync();
     }
-    if (randomStopTimeoutRef.current) {
-      clearTimeout(randomStopTimeoutRef.current);
-      randomStopTimeoutRef.current = null;
-    }
-    startSettleCountdown();
+    setTimeout(startSettleCountdown, 500);
   }
 
   function startSettleCountdown() {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
+    // Clear any existing interval.
     setCountdown(10);
     let count = 10;
-    countdownIntervalRef.current = setInterval(() => {
+    const interval = setInterval(() => {
       count -= 1;
       if (count < 0) {
-        clearInterval(countdownIntervalRef.current as NodeJS.Timeout);
-        countdownIntervalRef.current = null;
+        clearInterval(interval);
         setCountdown(null);
-        (async () => {
-          console.log("Countdown finished. Playing warning sound...");
-          setShowWarning(true);
-          const { sound: warningSound } = await Audio.Sound.createAsync(
-            require("../../assets/danger.mp3"),
-            { shouldPlay: true }
-          );
-          await waitForSoundToFinish(warningSound);
-          await warningSound.unloadAsync();
-          setShowWarning(false);
-          if (soundRef.current) {
-            const status = await soundRef.current.getStatusAsync();
-            if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
-              await soundRef.current.playAsync();
-              console.log("Music resumed.");
-            } else {
-              console.log("Music is either not loaded or already playing.");
-            }
-          } else {
-            console.log("Music reference is null. Recreating music with saved playback position...");
-            const { sound: newSound } = await Audio.Sound.createAsync(
-              require("../../assets/song.mp3"),
-              { shouldPlay: false }
+        // Deduct one chair if possible. If only one remains, game over.
+        if (selectedNumber <= 1) {
+          // Deducting the last chair triggers game over.
+          setSelectedNumber(0);
+          setGameOver(true);
+          // Display winner message for 5 seconds then reset.
+          setTimeout(() => {
+            resetGame();
+          }, 5000);
+        } else {
+          setSelectedNumber((prev) => prev - 1);
+          // Continue with warning sound and resume music.
+          (async () => {
+            console.log("Countdown finished. Playing warning sound...");
+            setShowWarning(true);
+            const { sound: warningSound } = await Audio.Sound.createAsync(
+              require("../../assets/danger.mp3"),
+              { shouldPlay: true }
             );
-            if (playbackPositionRef.current > 0) {
-              await newSound.setStatusAsync({
-                positionMillis: playbackPositionRef.current,
-              });
-              console.log("Restored playback position to:", playbackPositionRef.current);
+            await waitForSoundToFinish(warningSound);
+            await warningSound.unloadAsync();
+            setShowWarning(false);
+            if (soundRef.current) {
+              const status = await soundRef.current.getStatusAsync();
+              if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
+                await soundRef.current.playAsync();
+                console.log("Music resumed.");
+              } else {
+                console.log("Music is either not loaded or already playing.");
+              }
+            } else {
+              console.log("Music reference is null. Recreating music...");
+              const { sound: newSound } = await Audio.Sound.createAsync(
+                require("../../assets/song.mp3"),
+                { shouldPlay: false }
+              );
+              if (playbackPositionRef.current > 0) {
+                await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
+                console.log("Restored playback position to:", playbackPositionRef.current);
+              }
+              soundRef.current = newSound;
+              await newSound.playAsync();
+              console.log("Music recreated and resumed.");
             }
-            soundRef.current = newSound;
-            await newSound.playAsync();
-            console.log("Music recreated and resumed.");
-          }
-        })();
+          })();
+        }
       } else {
         setCountdown(count);
         animateCountdown();
@@ -179,80 +178,7 @@ export default function CameraScreen() {
     }, 1000);
   }
 
-  const toggleCamera = () => {
-    setCameraFacing((prev) => (prev === "back" ? "front" : "back"));
-  };
-
-  useFocusEffect(
-    React.useCallback(() => {
-      return () => {
-        if (soundRef.current) {
-          console.log("Navigating away: Stopping and unloading music.");
-          soundRef.current.stopAsync();
-          soundRef.current.unloadAsync();
-          soundRef.current = null;
-        }
-        if (countdownIntervalRef.current) {
-          clearInterval(countdownIntervalRef.current);
-          countdownIntervalRef.current = null;
-        }
-        if (randomStopTimeoutRef.current) {
-          clearTimeout(randomStopTimeoutRef.current);
-          randomStopTimeoutRef.current = null;
-        }
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-        router.replace("/");
-      };
-    }, [])
-  );
-
-  // Starts the countdown timer after a number has been selected.
-  const startGameCountdown = () => {
-    setCountdown(5);
-    let count = 5;
-    countdownIntervalRef.current = setInterval(() => {
-      count -= 1;
-      if (count < 0) {
-        clearInterval(countdownIntervalRef.current as NodeJS.Timeout);
-        countdownIntervalRef.current = null;
-        setCountdown(null);
-        playSound();
-        playbackPositionRef.current = 0;
-      } else {
-        setCountdown(count);
-        animateCountdown();
-      }
-    }, 1000);
-  };
-
-  const handleStartCancel = () => {
-    if (isActive) {
-      // Cancel game if active.
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = null;
-      }
-      if (randomStopTimeoutRef.current) {
-        clearTimeout(randomStopTimeoutRef.current);
-        randomStopTimeoutRef.current = null;
-      }
-      setCountdown(null);
-      if (soundRef.current) {
-        console.log("Cancelling game: stopping and unloading music.");
-        soundRef.current.stopAsync();
-        soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
-      setIsActive(false);
-      setShowNumberSelector(false);
-    } else {
-      // Start game.
-      setIsActive(true);
-      // Show number selector overlay. Countdown will start after a number is selected.
-      setShowNumberSelector(true);
-    }
-  };
-
+  // Recursive animation for countdown display.
   const animateCountdown = () => {
     fadeAnim.setValue(1);
     scaleAnim.setValue(1);
@@ -269,6 +195,73 @@ export default function CameraScreen() {
       }),
     ]).start();
   };
+
+  // Starts the game countdown (5 seconds) after a number is selected.
+  const startGameCountdown = () => {
+    let count = 5;
+    setCountdown(count);
+    const interval = setInterval(() => {
+      count -= 1;
+      if (count < 0) {
+        clearInterval(interval);
+        setCountdown(null);
+        playSound();
+        playbackPositionRef.current = 0;
+      } else {
+        setCountdown(count);
+        animateCountdown();
+      }
+    }, 1000);
+  };
+
+  const handleStartCancel = () => {
+    if (isActive) {
+      // Cancel game.
+      setCountdown(null);
+      if (soundRef.current) {
+        console.log("Cancelling game: stopping and unloading music.");
+        soundRef.current.stopAsync();
+        soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+      setIsActive(false);
+      setShowNumberSelector(false);
+    } else {
+      // Start game.
+      setIsActive(true);
+      // Show number selector overlay. Game countdown will start after a number is selected.
+      setShowNumberSelector(true);
+    }
+  };
+
+  const toggleCamera = () => {
+    setCameraFacing((prev) => (prev === "back" ? "front" : "back"));
+  };
+
+  const resetGame = () => {
+    // Reset game state.
+    setIsActive(false);
+    setShowNumberSelector(false);
+    setCountdown(null);
+    setGameOver(false);
+    // Optionally, reset selectedNumber to an initial value.
+    setSelectedNumber(1);
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (soundRef.current) {
+          console.log("Navigating away: Stopping and unloading music.");
+          soundRef.current.stopAsync();
+          soundRef.current.unloadAsync();
+          soundRef.current = null;
+        }
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        router.replace("/");
+      };
+    }, [])
+  );
 
   // Back button handler.
   const handleBack = () => {
@@ -341,15 +334,16 @@ export default function CameraScreen() {
         </View>
       )}
 
+      {/* Winner Overlay */}
+      {gameOver && (
+        <View style={styles.gameOverOverlay}>
+          <Text style={styles.gameOverText}>Congratulations Winner</Text>
+        </View>
+      )}
+
       {/* Start/Cancel Button */}
-      <TouchableOpacity
-        style={[styles.startButton, isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {}]}
-        onPress={handleStartCancel}
-      >
-        <Image
-          source={isActive ? require("../../assets/close.png") : require("../../assets/play.png")}
-          style={styles.startIcon}
-        />
+      <TouchableOpacity style={[styles.startButton, isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {}]} onPress={handleStartCancel}>
+        <Image source={isActive ? require("../../assets/close.png") : require("../../assets/play.png")} style={styles.startIcon} />
       </TouchableOpacity>
 
       {/* Camera Toggle Button */}
@@ -360,9 +354,7 @@ export default function CameraScreen() {
       {/* Vertical Number Selector Overlay */}
       {isActive && showNumberSelector && (
         <View style={styles.numberSelectorContainer}>
-          <Text style={styles.numberSelectorInstruction}>
-            Scroll to Select
-          </Text>
+          <Text style={styles.numberSelectorInstruction}>Scroll to Select</Text>
           <ScrollView
             ref={scrollViewRef}
             showsVerticalScrollIndicator={false}
@@ -522,11 +514,7 @@ const styles = StyleSheet.create({
     height: 30,
     marginRight: 8,
   },
-  selectedNumberText: {
-    fontSize: 24,
-    color: "black",
-    fontWeight: "bold",
-  },
+  selectedNumberText: { fontSize: 24, color: "black", fontWeight: "bold" },
   downArrowIcon: {
     width: 30,
     height: 30,
@@ -534,4 +522,21 @@ const styles = StyleSheet.create({
     marginTop: 10,
     tintColor: "white",
   },
+  gameOverOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.8)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 100,
+  },
+  gameOverText: {
+    fontSize: 32,
+    color: "white",
+    fontWeight: "bold",
+  },
 });
+
