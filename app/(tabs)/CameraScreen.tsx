@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { Audio } from "expo-av";
+import { Audio, Video } from "expo-av";
 import { useNavigation } from "@react-navigation/native";
 
 export default function CameraScreen() {
@@ -20,27 +20,10 @@ export default function CameraScreen() {
   const fadeAnim = new Animated.Value(1);
   const scaleAnim = new Animated.Value(1);
 
-  useEffect(() => {
-    const lockOrientation = async () => {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    };
-    lockOrientation();
+  // New state: whether to show the intro video.
+  const [showIntroVideo, setShowIntroVideo] = useState<boolean>(true);
 
-    return () => {
-      ScreenOrientation.unlockAsync();
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-      }
-      if (randomStopTimeoutRef.current) {
-        clearTimeout(randomStopTimeoutRef.current);
-      }
-      // On unmount, unload the sound instance if it exists.
-      if (soundRef.current) {
-        soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
-    };
-  }, []);
+  // Removed immediate orientation lock so the intro video can display in portrait.
 
   useEffect(() => {
     if (!permission?.granted) {
@@ -127,9 +110,9 @@ export default function CameraScreen() {
         clearInterval(countdownIntervalRef.current as NodeJS.Timeout);
         countdownIntervalRef.current = null;
         setCountdown(null);
-        // Resume sound using the stored playback position.
         (async () => {
           console.log("Countdown finished. Attempting to resume sound...");
+          if (isActive) {
             if (soundRef.current) {
               const status = await soundRef.current.getStatusAsync();
               if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
@@ -139,13 +122,11 @@ export default function CameraScreen() {
                 console.log("Sound is either not loaded or already playing.");
               }
             } else {
-              // If soundRef is null, recreate the sound instance using the saved playback position.
               console.log("Sound reference is null. Recreating sound with saved playback position...");
               const { sound: newSound } = await Audio.Sound.createAsync(
                 require("../../assets/song.mp3"),
                 { shouldPlay: false }
               );
-              console.log(playbackPositionRef.current)
               if (playbackPositionRef.current > 0) {
                 await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
                 console.log("Restored playback position to:", playbackPositionRef.current);
@@ -154,6 +135,9 @@ export default function CameraScreen() {
               await newSound.playAsync();
               console.log("Sound recreated and resumed.");
             }
+          } else {
+            console.log("Game is not active; not resuming sound.");
+          }
         })();
       } else {
         setCountdown(count);
@@ -197,6 +181,7 @@ export default function CameraScreen() {
           countdownIntervalRef.current = null;
           setCountdown(null);
           playSound();
+          playbackPositionRef.current = 0;
         } else {
           setCountdown(count);
           animateCountdown();
@@ -221,6 +206,27 @@ export default function CameraScreen() {
       }),
     ]).start();
   };
+
+  // When the screen first opens, show the intro video in portrait.
+  if (showIntroVideo) {
+    return (
+      <View style={styles.videoContainer}>
+        <Video
+          source={require("../../assets/intro.mp4")}
+          style={styles.video}
+          shouldPlay
+          resizeMode="cover"
+          onPlaybackStatusUpdate={(status) => {
+            if (status.didJustFinish) {
+              // Once the video finishes, lock orientation to landscape and show the camera UI.
+              ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+              setShowIntroVideo(false);
+            }
+          }}
+        />
+      </View>
+    );
+  }
 
   if (!permission) {
     return (
@@ -297,6 +303,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  videoContainer: {
+    flex: 1,
+    backgroundColor: "black",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  video: {
+    width: "100%",
+    height: "100%",
   },
   backButton: {
     position: "absolute",
