@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Image } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { Audio, Video } from "expo-av";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 
 export default function CameraScreen() {
-  const navigation = useNavigation();
+  const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   // Ref to hold the music instance.
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -135,29 +136,28 @@ export default function CameraScreen() {
           await warningSound.unloadAsync();
           setShowWarning(false);
           // Now resume music.
-         
-            if (soundRef.current) {
-              const status = await soundRef.current.getStatusAsync();
-              if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
-                await soundRef.current.playAsync();
-                console.log("Music resumed.");
-              } else {
-                console.log("Music is either not loaded or already playing.");
-              }
+          if (soundRef.current) {
+            const status = await soundRef.current.getStatusAsync();
+            if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
+              await soundRef.current.playAsync();
+              console.log("Music resumed.");
             } else {
-              console.log("Music reference is null. Recreating music with saved playback position...");
-              const { sound: newSound } = await Audio.Sound.createAsync(
-                require("../../assets/song.mp3"),
-                { shouldPlay: false }
-              );
-              if (playbackPositionRef.current > 0) {
-                await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
-                console.log("Restored playback position to:", playbackPositionRef.current);
-              }
-              soundRef.current = newSound;
-              await newSound.playAsync();
-              console.log("Music recreated and resumed.");
+              console.log("Music is either not loaded or already playing.");
             }
+          } else {
+            console.log("Music reference is null. Recreating music with saved playback position...");
+            const { sound: newSound } = await Audio.Sound.createAsync(
+              require("../../assets/song.mp3"),
+              { shouldPlay: false }
+            );
+            if (playbackPositionRef.current > 0) {
+              await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
+              console.log("Restored playback position to:", playbackPositionRef.current);
+            }
+            soundRef.current = newSound;
+            await newSound.playAsync();
+            console.log("Music recreated and resumed.");
+          }
         })();
       } else {
         setCountdown(count);
@@ -169,6 +169,31 @@ export default function CameraScreen() {
   const toggleCamera = () => {
     setCameraFacing((prev) => (prev === "back" ? "front" : "back"));
   };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      // When screen is focused, do nothing special
+      return () => {
+        // When screen is unfocused (navigated away), stop and unload the music
+        if (soundRef.current) {
+          console.log("Navigating away: Stopping and unloading music.");
+          soundRef.current.stopAsync();
+          soundRef.current.unloadAsync();
+          soundRef.current = null;
+        }
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+        if (randomStopTimeoutRef.current) {
+          clearTimeout(randomStopTimeoutRef.current);
+          randomStopTimeoutRef.current = null;
+        }
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        router.replace("/"); // "/" route corresponds to index.tsx
+      };
+    }, [])
+  );
 
   const handleStartCancel = () => {
     if (isActive) {
@@ -225,6 +250,12 @@ export default function CameraScreen() {
     ]).start();
   };
 
+  // Back button handler: resets orientation and navigates back to the Welcome screen (index.tsx)
+  const handleBack = () => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    router.replace("/"); // "/" route corresponds to index.tsx
+  };
+
   // When the screen first opens, show the intro video in portrait.
   if (showIntroVideo) {
     return (
@@ -272,10 +303,9 @@ export default function CameraScreen() {
       />
 
       {/* Back Button */}
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.backButtonText}>BACK</Text>
+      <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+        <Image source={require("../../assets/reply.png")} style={styles.backIcon} />
       </TouchableOpacity>
-
       {/* Countdown Display */}
       {countdown !== null && (
         <View style={styles.countdownContainer}>
@@ -286,25 +316,35 @@ export default function CameraScreen() {
           </Animated.Text>
         </View>
       )}
-
       {/* Neon Warning Overlay */}
       {showWarning && (
         <View style={styles.warningContainer}>
           <Text style={styles.warningText}>GAME IS RESUMING</Text>
         </View>
       )}
-
       {/* Start/Cancel Button */}
       <TouchableOpacity
-        style={[styles.startButton, isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {}]}
+        style={[
+          styles.startButton,
+          isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {},
+        ]}
         onPress={handleStartCancel}
       >
-        <Text style={styles.buttonText}>{isActive ? "Cancel" : "START"}</Text>
+        <Image
+          source={
+            isActive
+              ? require("../../assets/close.png")
+              : require("../../assets/play.png")
+          }
+          style={styles.startIcon}
+        />
       </TouchableOpacity>
-
       {/* Camera Toggle Button */}
       <TouchableOpacity style={styles.toggleButton} onPress={toggleCamera}>
-        <Text style={styles.buttonText}>SWITCH</Text>
+        <Image
+          source={require("../../assets/switch-camera.png")}
+          style={styles.switchIcon}
+        />
       </TouchableOpacity>
     </View>
   );
@@ -313,6 +353,11 @@ export default function CameraScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  switchIcon: {
+    width: 40,
+    height: 40,
+    resizeMode: "contain",
   },
   camera: {
     flex: 1,
@@ -348,6 +393,11 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 22,
     fontWeight: "bold",
+  },
+  backIcon: {
+    width: 40,    // adjust size as needed
+    height: 40,
+    resizeMode: "contain",
   },
   startButton: {
     position: "absolute",
@@ -399,7 +449,7 @@ const styles = StyleSheet.create({
     top: "50%",
     left: "25%",
     transform: [{ translateX: -50 }, { translateY: -50 }],
-    backgroundColor: "rgba(255,0,0,0.8)",
+    backgroundColor: "rgba(255,0,0,0.5)",
     padding: 20,
     borderRadius: 10,
   },
@@ -410,6 +460,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
     textShadowColor: "#ff0000",
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10,
+    textShadowRadius: 20,
+  },
+  startIcon: {
+    width: 40,
+    height: 40,
+    resizeMode: "contain",
   },
 });
