@@ -8,24 +8,36 @@ import { useNavigation } from "@react-navigation/native";
 export default function CameraScreen() {
   const navigation = useNavigation();
   const [permission, requestPermission] = useCameraPermissions();
-  // Ref to hold the audio instance.
+  // Ref to hold the music instance.
   const soundRef = useRef<Audio.Sound | null>(null);
   // Ref to store the current playback position (in milliseconds)
   const playbackPositionRef = useRef<number>(0);
   const [cameraFacing, setCameraFacing] = useState<"front" | "back">("back");
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isActive, setIsActive] = useState<boolean>(false);
+  const [showWarning, setShowWarning] = useState<boolean>(false);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const randomStopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fadeAnim = new Animated.Value(1);
   const scaleAnim = new Animated.Value(1);
-
   // New state: whether to show the intro video.
   const [showIntroVideo, setShowIntroVideo] = useState<boolean>(true);
 
-  // Removed immediate orientation lock so the intro video can display in portrait.
+  // Helper function to wait for a sound to finish playing.
+  const waitForSoundToFinish = (sound: Audio.Sound) => {
+    return new Promise<void>((resolve) => {
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if ("isLoaded" in status && status.isLoaded && status.didJustFinish) {
+          // Remove the callback to avoid multiple resolves.
+          sound.setOnPlaybackStatusUpdate(null);
+          resolve();
+        }
+      });
+    });
+  };
 
   useEffect(() => {
+    // Do not lock orientation immediately so the intro video can be portrait.
     if (!permission?.granted) {
       requestPermission();
     }
@@ -45,7 +57,7 @@ export default function CameraScreen() {
 
   async function playSound() {
     try {
-      console.log("Attempting to play sound...");
+      console.log("Attempting to play music...");
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         allowsRecordingIOS: false,
@@ -54,8 +66,8 @@ export default function CameraScreen() {
         playThroughEarpieceAndroid: false,
       });
       if (soundRef.current) {
-        // Resume the paused sound.
-        console.log("Resuming sound...");
+        // Resume the paused music.
+        console.log("Resuming music...");
         await soundRef.current.playAsync();
       } else {
         const { sound: newSound } = await Audio.Sound.createAsync(
@@ -68,17 +80,17 @@ export default function CameraScreen() {
           console.log("Restored playback position:", playbackPositionRef.current);
         }
         soundRef.current = newSound;
-        console.log("Playing new sound...");
+        console.log("Playing new music...");
       }
       // Schedule a random stop between 10 to 20 seconds.
       const randomDelay = Math.floor(Math.random() * 10000) + 10000;
       randomStopTimeoutRef.current = setTimeout(randomStop, randomDelay);
     } catch (error) {
-      console.error("Error playing sound:", error);
+      console.error("Error playing music:", error);
     }
   }
 
-  // This function pauses the sound and saves the current playback position.
+  // This function pauses the music and saves its current playback position.
   async function randomStop() {
     console.log("Random stop triggered");
     if (soundRef.current) {
@@ -87,7 +99,7 @@ export default function CameraScreen() {
         playbackPositionRef.current = status.positionMillis;
         console.log("Saved playback position:", playbackPositionRef.current);
       }
-      console.log("Pausing sound...");
+      console.log("Pausing music...");
       await soundRef.current.pauseAsync();
     }
     if (randomStopTimeoutRef.current) {
@@ -97,7 +109,7 @@ export default function CameraScreen() {
     startSettleCountdown();
   }
 
-  // Starts a 10-second countdown. After the countdown, it resumes playback.
+  // Starts a 10-second countdown. After it ends, plays warning sound and resumes music.
   function startSettleCountdown() {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
@@ -111,18 +123,29 @@ export default function CameraScreen() {
         countdownIntervalRef.current = null;
         setCountdown(null);
         (async () => {
-          console.log("Countdown finished. Attempting to resume sound...");
-          if (isActive) {
+          console.log("Countdown finished. Playing warning sound...");
+          // Show neon warning overlay.
+          setShowWarning(true);
+          const { sound: warningSound } = await Audio.Sound.createAsync(
+            require("../../assets/danger.mp3"),
+            { shouldPlay: true }
+          );
+          // Wait for warning sound to finish.
+          await waitForSoundToFinish(warningSound);
+          await warningSound.unloadAsync();
+          setShowWarning(false);
+          // Now resume music.
+         
             if (soundRef.current) {
               const status = await soundRef.current.getStatusAsync();
               if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
                 await soundRef.current.playAsync();
-                console.log("Sound resumed.");
+                console.log("Music resumed.");
               } else {
-                console.log("Sound is either not loaded or already playing.");
+                console.log("Music is either not loaded or already playing.");
               }
             } else {
-              console.log("Sound reference is null. Recreating sound with saved playback position...");
+              console.log("Music reference is null. Recreating music with saved playback position...");
               const { sound: newSound } = await Audio.Sound.createAsync(
                 require("../../assets/song.mp3"),
                 { shouldPlay: false }
@@ -133,11 +156,8 @@ export default function CameraScreen() {
               }
               soundRef.current = newSound;
               await newSound.playAsync();
-              console.log("Sound recreated and resumed.");
+              console.log("Music recreated and resumed.");
             }
-          } else {
-            console.log("Game is not active; not resuming sound.");
-          }
         })();
       } else {
         setCountdown(count);
@@ -152,7 +172,6 @@ export default function CameraScreen() {
 
   const handleStartCancel = () => {
     if (isActive) {
-      // Cancel the current countdown or settle process.
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
@@ -163,14 +182,13 @@ export default function CameraScreen() {
       }
       setCountdown(null);
       if (soundRef.current) {
-        console.log("Cancelling game: stopping and unloading sound.");
+        console.log("Cancelling game: stopping and unloading music.");
         soundRef.current.stopAsync();
         soundRef.current.unloadAsync();
         soundRef.current = null;
       }
       setIsActive(false);
     } else {
-      // Start the initial 5-second countdown before playing sound.
       setIsActive(true);
       setCountdown(5);
       let count = 5;
@@ -262,22 +280,23 @@ export default function CameraScreen() {
       {countdown !== null && (
         <View style={styles.countdownContainer}>
           <Animated.Text
-            style={[
-              styles.countdownText,
-              { opacity: fadeAnim, transform: [{ scale: scaleAnim }] },
-            ]}
+            style={[styles.countdownText, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}
           >
             {countdown}
           </Animated.Text>
         </View>
       )}
 
+      {/* Neon Warning Overlay */}
+      {showWarning && (
+        <View style={styles.warningContainer}>
+          <Text style={styles.warningText}>GAME IS RESUMING</Text>
+        </View>
+      )}
+
       {/* Start/Cancel Button */}
       <TouchableOpacity
-        style={[
-          styles.startButton,
-          isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {},
-        ]}
+        style={[styles.startButton, isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {}]}
         onPress={handleStartCancel}
       >
         <Text style={styles.buttonText}>{isActive ? "Cancel" : "START"}</Text>
@@ -374,5 +393,23 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "rgba(255, 255, 255, 0.8)",
     textAlign: "center",
+  },
+  warningContainer: {
+    position: "absolute",
+    top: "50%",
+    left: "25%",
+    transform: [{ translateX: -50 }, { translateY: -50 }],
+    backgroundColor: "rgba(255,0,0,0.8)",
+    padding: 20,
+    borderRadius: 10,
+  },
+  warningText: {
+    color: "#fff",
+    fontSize: 40,
+    fontWeight: "bold",
+    textAlign: "center",
+    textShadowColor: "#ff0000",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
   },
 });
