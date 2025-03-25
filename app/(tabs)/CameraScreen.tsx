@@ -151,56 +151,45 @@ export default function CameraScreen() {
       if (count < 0) {
         clearInterval(interval);
         setCountdown(null);
-        // When countdown finishes, deduct a chair.
-        if (selectedNumber <= 1) {
-          setSelectedNumber(0);
-          setGameOver(true);
-          // Show winner overlay for 5 seconds, then reset the game.
-          setManagedTimeout(() => {
-            resetGame();
-          }, 5000);
-        } else {
-          setSelectedNumber((prev) => prev - 1);
-          (async () => {
-            console.log("Countdown finished. Playing warning sound...");
-            setShowWarning(true);
-            const { sound: warningSound } = await Audio.Sound.createAsync(
-              require("../../assets/danger.mp3"),
-              { shouldPlay: true }
-            );
-            await waitForSoundToFinish(warningSound);
-            await warningSound.unloadAsync();
-            setShowWarning(false);
+        setSelectedNumber((prev) => {
+          const newCount = prev - 1;
+          // Now trigger game over if needed:
+          if (newCount < 1) {
+            setGameOver(true);
             if (soundRef.current) {
-              const status = await soundRef.current.getStatusAsync();
-              if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
-                await soundRef.current.playAsync();
-                console.log("Music resumed.");
-                // Schedule the next random stop after resuming.
-                const randomDelay = Math.floor(Math.random() * 10000) + 10000;
-                setManagedTimeout(randomStop, randomDelay);
-              } else {
-                console.log("Music is either not loaded or already playing.");
-              }
-            } else {
-              console.log("Music reference is null. Recreating music...");
-              const { sound: newSound } = await Audio.Sound.createAsync(
-                require("../../assets/song.mp3"),
-                { shouldPlay: false }
-              );
-              if (playbackPositionRef.current > 0) {
-                await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
-                console.log("Restored playback position to:", playbackPositionRef.current);
-              }
-              soundRef.current = newSound;
-              await newSound.playAsync();
-              console.log("Music recreated and resumed.");
-              const randomDelay = Math.floor(Math.random() * 10000) + 10000;
-              setManagedTimeout(randomStop, randomDelay);
+              soundRef.current.stopAsync();
             }
-          })();
-        }
-      } else {
+            clearAllTimeouts();
+            setManagedTimeout(() => {
+              resetGame();
+            }, 5000);
+          } else {
+            // Otherwise, continue with warning sound, etc.
+            (async () => {
+              console.log("Countdown finished. Playing warning sound...");
+              setShowWarning(true);
+              const { sound: warningSound } = await Audio.Sound.createAsync(
+                require("../../assets/danger.mp3"),
+                { shouldPlay: true }
+              );
+              await waitForSoundToFinish(warningSound);
+              await warningSound.unloadAsync();
+              setShowWarning(false);
+              if (soundRef.current) {
+                const status = await soundRef.current.getStatusAsync();
+                if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
+                  await soundRef.current.playAsync();
+                  console.log("Music resumed.");
+                  const randomDelay = Math.floor(Math.random() * 10000) + 10000;
+                  setManagedTimeout(randomStop, randomDelay);
+                }
+              }
+            })();
+          }
+          return newCount;
+        });
+      }
+       else {
         setCountdown(count);
         animateCountdown();
       }
