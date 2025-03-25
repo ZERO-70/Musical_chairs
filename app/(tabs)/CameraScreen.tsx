@@ -1,10 +1,22 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Image } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  Image,
+  ScrollView,
+} from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { Audio, Video } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+
+const ITEM_HEIGHT = 80;
+const ITEM_MARGIN = 10;
+const SNAP_INTERVAL = ITEM_HEIGHT + ITEM_MARGIN * 2;
 
 export default function CameraScreen() {
   const router = useRouter();
@@ -17,19 +29,25 @@ export default function CameraScreen() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isActive, setIsActive] = useState<boolean>(false);
   const [showWarning, setShowWarning] = useState<boolean>(false);
+  // State for showing the number selector overlay.
+  const [showNumberSelector, setShowNumberSelector] = useState<boolean>(false);
+  // The selected number (number of chairs)
+  const [selectedNumber, setSelectedNumber] = useState<number>(1);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const randomStopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fadeAnim = new Animated.Value(1);
   const scaleAnim = new Animated.Value(1);
-  // New state: whether to show the intro video.
+  // State for showing the intro video.
   const [showIntroVideo, setShowIntroVideo] = useState<boolean>(true);
 
-  // Helper function to wait for a sound to finish playing.
+  // Reference for the vertical ScrollView
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Helper: Wait for a sound to finish playing.
   const waitForSoundToFinish = (sound: Audio.Sound) => {
     return new Promise<void>((resolve) => {
       sound.setOnPlaybackStatusUpdate((status) => {
         if ("isLoaded" in status && status.isLoaded && status.didJustFinish) {
-          // Remove the callback to avoid multiple resolves.
           sound.setOnPlaybackStatusUpdate(null);
           resolve();
         }
@@ -38,7 +56,6 @@ export default function CameraScreen() {
   };
 
   useEffect(() => {
-    // Do not lock orientation immediately so the intro video can be portrait.
     if (!permission?.granted) {
       requestPermission();
     }
@@ -67,7 +84,6 @@ export default function CameraScreen() {
         playThroughEarpieceAndroid: false,
       });
       if (soundRef.current) {
-        // Resume the paused music.
         console.log("Resuming music...");
         await soundRef.current.playAsync();
       } else {
@@ -75,15 +91,15 @@ export default function CameraScreen() {
           require("../../assets/song.mp3"),
           { shouldPlay: true }
         );
-        // If we have a saved playback position, set it before playing.
         if (playbackPositionRef.current > 0) {
-          await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
+          await newSound.setStatusAsync({
+            positionMillis: playbackPositionRef.current,
+          });
           console.log("Restored playback position:", playbackPositionRef.current);
         }
         soundRef.current = newSound;
         console.log("Playing new music...");
       }
-      // Schedule a random stop between 10 to 20 seconds.
       const randomDelay = Math.floor(Math.random() * 10000) + 10000;
       randomStopTimeoutRef.current = setTimeout(randomStop, randomDelay);
     } catch (error) {
@@ -91,7 +107,6 @@ export default function CameraScreen() {
     }
   }
 
-  // This function pauses the music and saves its current playback position.
   async function randomStop() {
     console.log("Random stop triggered");
     if (soundRef.current) {
@@ -110,7 +125,6 @@ export default function CameraScreen() {
     startSettleCountdown();
   }
 
-  // Starts a 10-second countdown. After it ends, plays warning sound and resumes music.
   function startSettleCountdown() {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
@@ -125,17 +139,14 @@ export default function CameraScreen() {
         setCountdown(null);
         (async () => {
           console.log("Countdown finished. Playing warning sound...");
-          // Show neon warning overlay.
           setShowWarning(true);
           const { sound: warningSound } = await Audio.Sound.createAsync(
             require("../../assets/danger.mp3"),
             { shouldPlay: true }
           );
-          // Wait for warning sound to finish.
           await waitForSoundToFinish(warningSound);
           await warningSound.unloadAsync();
           setShowWarning(false);
-          // Now resume music.
           if (soundRef.current) {
             const status = await soundRef.current.getStatusAsync();
             if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
@@ -151,7 +162,9 @@ export default function CameraScreen() {
               { shouldPlay: false }
             );
             if (playbackPositionRef.current > 0) {
-              await newSound.setStatusAsync({ positionMillis: playbackPositionRef.current });
+              await newSound.setStatusAsync({
+                positionMillis: playbackPositionRef.current,
+              });
               console.log("Restored playback position to:", playbackPositionRef.current);
             }
             soundRef.current = newSound;
@@ -172,9 +185,7 @@ export default function CameraScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
-      // When screen is focused, do nothing special
       return () => {
-        // When screen is unfocused (navigated away), stop and unload the music
         if (soundRef.current) {
           console.log("Navigating away: Stopping and unloading music.");
           soundRef.current.stopAsync();
@@ -190,13 +201,33 @@ export default function CameraScreen() {
           randomStopTimeoutRef.current = null;
         }
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-        router.replace("/"); // "/" route corresponds to index.tsx
+        router.replace("/");
       };
     }, [])
   );
 
+  // Starts the countdown timer after a number has been selected.
+  const startGameCountdown = () => {
+    setCountdown(5);
+    let count = 5;
+    countdownIntervalRef.current = setInterval(() => {
+      count -= 1;
+      if (count < 0) {
+        clearInterval(countdownIntervalRef.current as NodeJS.Timeout);
+        countdownIntervalRef.current = null;
+        setCountdown(null);
+        playSound();
+        playbackPositionRef.current = 0;
+      } else {
+        setCountdown(count);
+        animateCountdown();
+      }
+    }, 1000);
+  };
+
   const handleStartCancel = () => {
     if (isActive) {
+      // Cancel game if active.
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
@@ -213,23 +244,12 @@ export default function CameraScreen() {
         soundRef.current = null;
       }
       setIsActive(false);
+      setShowNumberSelector(false);
     } else {
+      // Start game.
       setIsActive(true);
-      setCountdown(5);
-      let count = 5;
-      countdownIntervalRef.current = setInterval(() => {
-        count -= 1;
-        if (count < 0) {
-          clearInterval(countdownIntervalRef.current as NodeJS.Timeout);
-          countdownIntervalRef.current = null;
-          setCountdown(null);
-          playSound();
-          playbackPositionRef.current = 0;
-        } else {
-          setCountdown(count);
-          animateCountdown();
-        }
-      }, 1000);
+      // Show number selector overlay. Countdown will start after a number is selected.
+      setShowNumberSelector(true);
     }
   };
 
@@ -250,13 +270,12 @@ export default function CameraScreen() {
     ]).start();
   };
 
-  // Back button handler: resets orientation and navigates back to the Welcome screen (index.tsx)
+  // Back button handler.
   const handleBack = () => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    router.replace("/"); // "/" route corresponds to index.tsx
+    router.replace("/");
   };
 
-  // When the screen first opens, show the intro video in portrait.
   if (showIntroVideo) {
     return (
       <View style={styles.videoContainer}>
@@ -267,7 +286,6 @@ export default function CameraScreen() {
           resizeMode="cover"
           onPlaybackStatusUpdate={(status) => {
             if (status.didJustFinish) {
-              // Once the video finishes, lock orientation to landscape and show the camera UI.
               ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
               setShowIntroVideo(false);
             }
@@ -306,78 +324,101 @@ export default function CameraScreen() {
       <TouchableOpacity style={styles.backButton} onPress={handleBack}>
         <Image source={require("../../assets/reply.png")} style={styles.backIcon} />
       </TouchableOpacity>
+
       {/* Countdown Display */}
       {countdown !== null && (
         <View style={styles.countdownContainer}>
-          <Animated.Text
-            style={[styles.countdownText, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}
-          >
+          <Animated.Text style={[styles.countdownText, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
             {countdown}
           </Animated.Text>
         </View>
       )}
+
       {/* Neon Warning Overlay */}
       {showWarning && (
         <View style={styles.warningContainer}>
           <Text style={styles.warningText}>GAME IS RESUMING</Text>
         </View>
       )}
+
       {/* Start/Cancel Button */}
       <TouchableOpacity
-        style={[
-          styles.startButton,
-          isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {},
-        ]}
+        style={[styles.startButton, isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {}]}
         onPress={handleStartCancel}
       >
         <Image
-          source={
-            isActive
-              ? require("../../assets/close.png")
-              : require("../../assets/play.png")
-          }
+          source={isActive ? require("../../assets/close.png") : require("../../assets/play.png")}
           style={styles.startIcon}
         />
       </TouchableOpacity>
+
       {/* Camera Toggle Button */}
       <TouchableOpacity style={styles.toggleButton} onPress={toggleCamera}>
-        <Image
-          source={require("../../assets/switch-camera.png")}
-          style={styles.switchIcon}
-        />
+        <Image source={require("../../assets/switch-camera.png")} style={styles.switchIcon} />
       </TouchableOpacity>
+
+      {/* Vertical Number Selector Overlay */}
+      {isActive && showNumberSelector && (
+        <View style={styles.numberSelectorContainer}>
+          <Text style={styles.numberSelectorInstruction}>
+            Scroll to Select
+          </Text>
+          <ScrollView
+            ref={scrollViewRef}
+            showsVerticalScrollIndicator={false}
+            snapToInterval={SNAP_INTERVAL}
+            decelerationRate="fast"
+            onMomentumScrollEnd={(event) => {
+              const offsetY = event.nativeEvent.contentOffset.y;
+              const index = Math.round(offsetY / SNAP_INTERVAL);
+              setSelectedNumber(index + 1);
+            }}
+          >
+            {Array.from({ length: 20 }).map((_, index) => {
+              const number = index + 1;
+              const isSelected = number === selectedNumber;
+              return (
+                <TouchableOpacity
+                  key={index}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setSelectedNumber(number);
+                    setShowNumberSelector(false);
+                    startGameCountdown();
+                  }}
+                >
+                  <View style={[styles.numberItem, isSelected && styles.selectedNumberItem]}>
+                    <Text style={[styles.numberText, isSelected && styles.selectedNumberText]}>
+                      {number}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          {/* Down arrow icon below the scroller */}
+          <Image source={require("../../assets/down-arrow.png")} style={styles.downArrowIcon} />
+        </View>
+      )}
+
+      {/* Display the selected number with chair icon in bottom left corner */}
+      {isActive && !showNumberSelector && (
+        <View style={styles.selectedNumberDisplay}>
+          <Image source={require("../../assets/chair.png")} style={styles.chairIcon} />
+          <Text style={styles.selectedNumberText}>{selectedNumber}</Text>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  switchIcon: {
-    width: 40,
-    height: 40,
-    resizeMode: "contain",
-  },
-  camera: {
-    flex: 1,
-    width: "100%",
-  },
-  permissionContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  videoContainer: {
-    flex: 1,
-    backgroundColor: "black",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  video: {
-    width: "100%",
-    height: "100%",
-  },
+  container: { flex: 1 },
+  switchIcon: { width: 40, height: 40, resizeMode: "contain" },
+  camera: { flex: 1, width: "100%" },
+  permissionContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  videoContainer: { flex: 1, backgroundColor: "black", justifyContent: "center", alignItems: "center" },
+  video: { width: "100%", height: "100%" },
   backButton: {
     position: "absolute",
     top: 40,
@@ -389,16 +430,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 25,
     borderRadius: 40,
   },
-  backButtonText: {
-    color: "white",
-    fontSize: 22,
-    fontWeight: "bold",
-  },
-  backIcon: {
-    width: 40,    // adjust size as needed
-    height: 40,
-    resizeMode: "contain",
-  },
+  backIcon: { width: 40, height: 40, resizeMode: "contain" },
   startButton: {
     position: "absolute",
     bottom: 130,
@@ -427,23 +459,13 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
   },
-  buttonText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
   countdownContainer: {
     position: "absolute",
     top: "40%",
     left: "50%",
     transform: [{ translateX: -50 }, { translateY: -50 }],
   },
-  countdownText: {
-    fontSize: 120,
-    fontWeight: "bold",
-    color: "rgba(255, 255, 255, 0.8)",
-    textAlign: "center",
-  },
+  countdownText: { fontSize: 120, fontWeight: "bold", color: "rgba(255, 255, 255, 0.8)", textAlign: "center" },
   warningContainer: {
     position: "absolute",
     top: "50%",
@@ -453,18 +475,63 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 10,
   },
-  warningText: {
-    color: "#fff",
-    fontSize: 40,
-    fontWeight: "bold",
-    textAlign: "center",
-    textShadowColor: "#ff0000",
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
+  warningText: { color: "#fff", fontSize: 40, fontWeight: "bold", textAlign: "center", textShadowColor: "#ff0000", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 20 },
+  startIcon: { width: 40, height: 40, resizeMode: "contain" },
+  numberSelectorContainer: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    width: ITEM_HEIGHT + ITEM_MARGIN * 2,
+    height: "50%",
+    transform: [{ translateX: -(ITEM_HEIGHT + ITEM_MARGIN * 2) / 2 }, { translateY: -100 }],
   },
-  startIcon: {
-    width: 40,
-    height: 40,
-    resizeMode: "contain",
+  numberSelectorInstruction: {
+    position: "absolute",
+    top: -40,
+    left: 0,
+    right: 0,
+    textAlign: "center",
+    fontSize: 16,
+    color: "white",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingVertical: 4,
+    borderRadius: 4,
+    zIndex: 1,
+  },
+  numberItem: { height: ITEM_HEIGHT, marginVertical: ITEM_MARGIN, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 10 },
+  numberText: { fontSize: 24, color: "white" },
+  selectedNumberItem: { backgroundColor: "rgba(255,255,255,0.6)" },
+  selectedNumberDisplay: {
+    position: "absolute",
+    bottom: 20,
+    left: 20,
+    backgroundColor: "rgba(255,255,255,0.8)",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  chairIcon: {
+    width: 30,
+    height: 30,
+    marginRight: 8,
+  },
+  selectedNumberText: {
+    fontSize: 24,
+    color: "black",
+    fontWeight: "bold",
+  },
+  downArrowIcon: {
+    width: 30,
+    height: 30,
+    alignSelf: "center",
+    marginTop: 10,
+    tintColor: "white",
   },
 });
