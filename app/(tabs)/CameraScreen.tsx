@@ -716,7 +716,7 @@ function startSettleCountdown() {
             loop
             style={styles.lottie}
             />
-          <Text style={styles.detectionText}>Chairs are being Detected...</Text>
+          <Text style={styles.detectionText}>Chairs are being Detected</Text>
         </View>
       )}
 
@@ -813,15 +813,15 @@ const styles = StyleSheet.create({
     left: "50%",
     transform: [{ translateX: -50 }, { translateY: -50 }],
   },
-  countdownText: { fontSize: 120, fontWeight: "bold", color: "rgba(255,255,255,0.8)", textAlign: "center" },
+  countdownText: { fontSize: 120, fontWeight: "bold", color: "rgba(255,255,255,0.8)", justifyContent: "center" },
   warningContainer: {
     position: "absolute",
     top: "50%",
     left: "30%",
     transform: [{ translateX: -50 }, { translateY: -50 }],
-    backgroundColor: "rgba(255,0,0,0.5)",
+    backgroundColor: "rgba(191, 0, 0, 0.5)",
     padding: 20,
-    borderRadius: 10,
+    borderRadius: 30,
   },
   warningText: {
     color: "#fff",
@@ -898,13 +898,15 @@ const styles = StyleSheet.create({
   detectionOverlay: {
     position: "absolute",
     top: "10%",
-    left: 0,
-    right: 0,
+    left: 140,
+    right: 140,
+    borderRadius: 20,
+    justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.5)",
     paddingVertical: 10,
   },
-  detectionText: { fontSize: 20, color: "white", fontWeight: "bold" },
+  detectionText: { fontSize: 20, color: "white", fontWeight: "bold",justifyContent: "center" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",
@@ -930,13 +932,13 @@ const styles = StyleSheet.create({
   modalButtonText: { color: "white", fontSize: 16 },
   notFilledOverlay: {
     position: "absolute",
-    top: "20%",
-    left: 0,
-    right: 0,
+    top: "10%",
+    left: 140,
+    right: 140,
     alignItems: "center",
-    backgroundColor: "rgba(255,0,0,0.7)",
-    padding: 15,
-    borderRadius: 10,
+    backgroundColor: "rgba(200, 0, 0, 0.65)",
+    paddingVertical: 10,
+    borderRadius: 20,
   },
   notFilledText: {
     fontSize: 20,
@@ -947,8 +949,8 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     position: "absolute",
-    top: "-60%", // adjust as needed
-    right: "45%", // adjust as needed
+    top: "-80%", // adjust as needed
+    right: "42%", // adjust as needed
     opacity: 0.7,
   },
 });

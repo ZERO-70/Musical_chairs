@@ -12,21 +12,47 @@ import { useRouter } from 'expo-router';
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  
+  // Animated values
   const colorAnimation = useRef(new Animated.Value(0)).current;
+  const scaleAnimation = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    // 1. Color animation (must be JS-driven for color interpolation)
     Animated.loop(
       Animated.timing(colorAnimation, {
         toValue: 3,
         duration: 7000,
-        useNativeDriver: false,
+        useNativeDriver: false, // Keep this false for color interpolation
       })
     ).start();
-  }, [colorAnimation]);
+    
+    // 2. Scale animation (set to false to avoid conflict)
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(scaleAnimation, {
+          toValue: 1.1,
+          duration: 500,
+          useNativeDriver: false, // Change this to false
+        }),
+        Animated.timing(scaleAnimation, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: false, // Change this to false
+        }),
+      ])
+    ).start();
+  }, [colorAnimation, scaleAnimation]);
 
+  // Color interpolation
   const animatedColor = colorAnimation.interpolate({
     inputRange: [0, 1, 2, 3],
-    outputRange: ['rgb(255, 20, 20)', 'rgb(149, 0, 255)', 'rgb(255, 221, 0)', 'rgb(255,105,180)'],
+    outputRange: [
+      'rgb(255, 20, 20)', 
+      'rgb(149, 0, 255)', 
+      'rgb(255, 221, 0)', 
+      'rgb(255,105,180)',
+    ],
   });
 
   return (
@@ -39,7 +65,15 @@ export default function WelcomeScreen() {
     >
       <View style={styles.overlay}>
         <View style={styles.content}>
-          <Animated.Text style={[styles.title, { color: animatedColor }]}>
+          <Animated.Text
+            style={[
+              styles.title,
+              { 
+                color: animatedColor,
+                transform: [{ scale: scaleAnimation }],
+              },
+            ]}
+          >
             MUSICAL CHAIRS
           </Animated.Text>
           <Text style={styles.subtitle}>Are You Ready to Party?</Text>
@@ -48,11 +82,7 @@ export default function WelcomeScreen() {
             style={styles.playButton}
             onPress={() => router.push('/CameraScreen')}
           >
-            <MaterialIcons
-              name="play-circle-filled"
-              size={40}
-              color="#fff"
-            />
+            <MaterialIcons name="play-circle-filled" size={40} color="#fff" />
             <Text style={styles.buttonText}>START GAME</Text>
           </TouchableOpacity>
 
