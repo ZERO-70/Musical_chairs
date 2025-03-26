@@ -15,6 +15,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { Audio, Video, ResizeMode } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import LottieView from "lottie-react-native";
 
 // Custom hook to manage timeouts.
 function useTimeoutManager() {
@@ -709,6 +710,12 @@ function startSettleCountdown() {
       {/* While detection is running, show overlay text */}
       {isDetecting && (
         <View style={styles.detectionOverlay}>
+            <LottieView
+            source={require("../../assets/loading.json")}
+            autoPlay
+            loop
+            style={styles.lottie}
+            />
           <Text style={styles.detectionText}>Chairs are being Detected...</Text>
         </View>
       )}
@@ -810,7 +817,7 @@ const styles = StyleSheet.create({
   warningContainer: {
     position: "absolute",
     top: "50%",
-    left: "25%",
+    left: "30%",
     transform: [{ translateX: -50 }, { translateY: -50 }],
     backgroundColor: "rgba(255,0,0,0.5)",
     padding: 20,
@@ -935,5 +942,13 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: "white",
     fontWeight: "bold",
+  },
+  lottie: {
+    width: 100,
+    height: 100,
+    position: "absolute",
+    top: "-60%", // adjust as needed
+    right: "45%", // adjust as needed
+    opacity: 0.7,
   },
 });
