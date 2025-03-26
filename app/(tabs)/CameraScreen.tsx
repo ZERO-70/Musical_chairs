@@ -87,6 +87,9 @@ export default function CameraScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const warningSoundRef = useRef<Audio.Sound | null>(null);
+
+
   // Helper: Wait for a sound to finish playing.
   const waitForSoundToFinish = (sound: Audio.Sound) => {
     return new Promise<void>((resolve) => {
@@ -186,7 +189,7 @@ function startSettleCountdown() {
           } as any);
           // Send image to the /sitstand endpoint.
           const response = await fetch(
-            "https://b353-175-107-228-183.ngrok-free.app/sitstand",
+            "https://2667-154-80-44-53.ngrok-free.app/sitstand",
             {
               method: "POST",
               body: formData,
@@ -278,6 +281,8 @@ function startSettleCountdown() {
                     require("../../assets/danger.mp3"),
                     { shouldPlay: true }
                   );
+                  //storing the refrence of the warning sound
+                  warningSoundRef.current = warningSound;
                   await waitForSoundToFinish(warningSound);
                   await warningSound.unloadAsync();
                   setShowWarning(false);
@@ -413,7 +418,7 @@ function startSettleCountdown() {
           type: "image/jpeg",
           name: "photo.jpg",
         } as any);
-        const response = await fetch("https://b353-175-107-228-183.ngrok-free.app/object", {
+        const response = await fetch("https://2667-154-80-44-53.ngrok-free.app/object", {
           method: "POST",
           body: formData,
           headers: { "Content-Type": "multipart/form-data" },
@@ -458,6 +463,14 @@ function startSettleCountdown() {
   // When start/cancel button is pressed.
   const handleStartCancel = () => {
     if (isActive) {
+        setShowWarning(false);
+        if (warningSoundRef.current) {
+            console.log("Cancelling game: stopping warning sound.");
+            warningSoundRef.current.stopAsync();
+            warningSoundRef.current.unloadAsync();
+            warningSoundRef.current = null;
+        }
+
       if (isDetecting) {
         detectionCanceledRef.current = true;
         setIsDetecting(false);
@@ -476,6 +489,12 @@ function startSettleCountdown() {
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
       }
+
+      // Reset the selected number and game over state.
+        setCountdown(null);
+        setGameOver(false);
+        setSelectedNumber(0);
+
     } else {
       setIsActive(true);
       startChairDetection();
