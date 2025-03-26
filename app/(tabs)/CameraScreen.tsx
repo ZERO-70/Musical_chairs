@@ -190,7 +190,7 @@ function startSettleCountdown() {
           } as any);
           // Send image to the /sitstand endpoint.
           const response = await fetch(
-            "https://2667-154-80-44-53.ngrok-free.app/sitstand",
+            "https://29eb-154-80-53-22.ngrok-free.app/sitstand",
             {
               method: "POST",
               body: formData,
@@ -419,7 +419,7 @@ function startSettleCountdown() {
           type: "image/jpeg",
           name: "photo.jpg",
         } as any);
-        const response = await fetch("https://2667-154-80-44-53.ngrok-free.app/object", {
+        const response = await fetch("https://29eb-154-80-53-22.ngrok-free.app/object", {
           method: "POST",
           body: formData,
           headers: { "Content-Type": "multipart/form-data" },
@@ -837,9 +837,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: "50%",
     left: "50%",
-    width: ITEM_HEIGHT + ITEM_MARGIN * 2,
+    width: ITEM_HEIGHT + ITEM_MARGIN * 2 - 20, // Reduced width
     height: "50%",
-    transform: [{ translateX: -(ITEM_HEIGHT + ITEM_MARGIN * 2) / 2 }, { translateY: -100 }],
+    transform: [{ translateX: -(ITEM_HEIGHT + ITEM_MARGIN * 2 - 20) / 2 }, { translateY: -100 }], // Adjusted translation
   },
   numberSelectorInstruction: {
     position: "absolute",
@@ -906,10 +906,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
     paddingVertical: 10,
   },
-  detectionText: { fontSize: 20, color: "white", fontWeight: "bold",justifyContent: "center" },
+  detectionText: { fontSize: 20, color: "white", fontWeight: "bold", justifyContent: "center" },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "rgba(0, 0, 0, 0.43)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -921,13 +921,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalText: { fontSize: 18, color: "white", marginVertical: 10, textAlign: "center" },
-  modalButtonContainer: { flexDirection: "row", marginTop: 20 },
+  modalButtonContainer: { flexDirection: "row", marginTop: 15, borderRadius: 400, opacity: 0.5, justifyContent: "center" },
   modalButton: {
     backgroundColor: "#555",
     paddingVertical: 10,
     paddingHorizontal: 15,
     marginHorizontal: 10,
-    borderRadius: 5,
+    borderRadius: 10,
   },
   modalButtonText: { color: "white", fontSize: 16 },
   notFilledOverlay: {
