@@ -298,12 +298,24 @@ export default function CameraScreen() {
 
     useFocusEffect(
         React.useCallback(() => {
-            return () => {
-
-            };
+          // When screen is focused, do nothing special
+          return () => {
+            // When screen is unfocused (navigated away), stop and unload the music
+            if (soundRef.current) {
+              console.log("Navigating away: Stopping and unloading music.");
+              soundRef.current.stopAsync();
+              soundRef.current.unloadAsync();
+              soundRef.current = null;
+            }
+            if (countdownIntervalRef.current) {
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
+            }
+            ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            router.replace("/"); // "/" route corresponds to index.tsx
+          };
         }, [])
-    );
-
+      );
 
 
     // Back button handler.
