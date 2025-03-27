@@ -49,6 +49,8 @@ export default function CameraScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const { setManagedTimeout, clearAllTimeouts } = useTimeoutManager();
+// At the top of your component along with your other states:
+const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null>(null);
 
   // Ref for the camera so we can capture frames.
   const cameraRef = useRef<Camera>(null);
@@ -171,7 +173,6 @@ function startSettleCountdown() {
     const totalFrames = 3;
     setIsDetecting(true);
     for (let i = 0; i < totalFrames; i++) {
-      // Check for cancellation on each iteration.
       if (detectionCanceledRef.current) {
         console.log("Sit–stand detection canceled at frame", i);
         break;
@@ -182,6 +183,9 @@ function startSettleCountdown() {
           base64: false,
         });
         if (picture) {
+          // Save the last captured image URI for later display.
+          setLastDetectionImageUri(picture.uri);
+    
           const formData = new FormData();
           formData.append("image", {
             uri: picture.uri,
@@ -190,7 +194,7 @@ function startSettleCountdown() {
           } as any);
           // Send image to the /sitstand endpoint.
           const response = await fetch(
-            "https://29eb-154-80-53-22.ngrok-free.app/sitstand",
+            "https://5b37-103-4-94-109.ngrok-free.app/sitstand",
             {
               method: "POST",
               body: formData,
@@ -211,7 +215,7 @@ function startSettleCountdown() {
         console.error("Error during sit–stand detection:", error);
       }
       await new Promise((resolve) => setTimeout(resolve, 500)); // 2 frames per sec
-    }
+    }    
     return detectionResults;
   })();
 
@@ -419,7 +423,7 @@ function startSettleCountdown() {
           type: "image/jpeg",
           name: "photo.jpg",
         } as any);
-        const response = await fetch("https://29eb-154-80-53-22.ngrok-free.app/object", {
+        const response = await fetch("https://5b37-103-4-94-109.ngrok-free.app/object", {
           method: "POST",
           body: formData,
           headers: { "Content-Type": "multipart/form-data" },
@@ -527,6 +531,7 @@ function startSettleCountdown() {
     setGameOver(false);
     setSelectedNumber(0);
     clearAllTimeouts();
+    setLastDetectionImageUri(null);
   };
 
   useFocusEffect(
@@ -640,10 +645,14 @@ function startSettleCountdown() {
 
       {/* Game Over Overlay */}
       {gameOver && (
-        <View style={styles.gameOverOverlay}>
-          <Text style={styles.gameOverText}>Congratulations Winner</Text>
-        </View>
-      )}
+  <View style={styles.gameOverOverlay}>
+    {lastDetectionImageUri && (
+      <Image source={{ uri: lastDetectionImageUri }} style={styles.gameOverImage} />
+    )}
+    <Text style={styles.gameOverText}>Congratulations Winner</Text>
+  </View>
+)}
+
 
       {/* Start/Cancel Button */}
       <TouchableOpacity
@@ -726,6 +735,7 @@ function startSettleCountdown() {
           <Text style={styles.notFilledText}>All chairs are not filled</Text>
         </View>
       )}
+      
 
       {/* Chair Detection Prompt Modal */}
       <Modal
@@ -823,6 +833,12 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 30,
   },
+  gameOverImage: {
+    width: "80%",
+    height: "50%",
+    resizeMode: "contain",
+    marginBottom: 20, // optional, for spacing between image and text
+  },  
   warningText: {
     color: "#fff",
     fontSize: 40,
