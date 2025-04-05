@@ -15,7 +15,8 @@ import { Audio, Video, ResizeMode } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import LottieView from "lottie-react-native";
-import {  loadModel, detectChairs  } from "../services/LocalInference"; // Import the local inference function
+import { loadYoloModel,runLocalInference } from '@/modelLoader';
+import * as ort from 'onnxruntime-react-native';
 
 // Custom hook to manage timeouts.
 function useTimeoutManager() {
@@ -52,7 +53,7 @@ export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const { setManagedTimeout, clearAllTimeouts } = useTimeoutManager();
 // At the top of your component along with your other states:
-const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null>(null);
+  const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null>(null);
 
   // Ref for the camera so we can capture frames.
   // @ts-ignore
@@ -111,6 +112,20 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
       });
     });
   };
+
+  // In App.tsx or a relevant component
+  const [modelSession, setModelSession] = useState<ort.InferenceSession | null>(null);
+
+  useEffect(() => {
+    async function initModel() {
+      const session = await loadYoloModel();
+      if (session) {
+        setModelSession(session);
+      }
+    }
+    initModel();
+  }, []);
+
 
   useEffect(() => {
     if (!permission?.granted) {
@@ -447,40 +462,46 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     detectionCanceledRef.current = false;
     setIsDetecting(true);
     let detectionResults: number[] = [];
-    const totalFrames = 1;
-    const delayBetweenFrames = 1000 / 4; 
+    const totalFrames = 1; // You can adjust this if you want to sample more frames.
+    const delayBetweenFrames = 1000 / 4; // 250ms between frames
+
+    // Assume that you already have a loaded model session stored in a variable or state.
+    // For example, you might have loaded it earlier and stored it as `modelSession`.
+    if (!modelSession) {
+      console.error("Model session not loaded");
+      setIsDetecting(false);
+      return;
+    }
+
     for (let i = 0; i < totalFrames; i++) {
       if (detectionCanceledRef.current) {
         console.log("Chair detection canceled at frame", i);
         break;
       }
       try {
+        // Capture a picture from the camera.
         const picture = await cameraRef.current.takePictureAsync({
           quality: 0.5,
           base64: false,
         });
-        const formData = new FormData();
-        formData.append("image", {
-          uri: picture.uri,
-          type: "image/jpeg",
-          name: "photo.jpg",
-        } as any);
-        const response = await fetch("https://5b37-103-4-94-109.ngrok-free.app/object", {
-          method: "POST",
-          body: formData,
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-        const json = await response.json();
-        detectionResults.push(json.chair_count);
+
+        // Instead of sending the image to a server, run local inference.
+        const chairCount = await runLocalInference(modelSession, picture.uri);
+        detectionResults.push(chairCount);
+        console.log(`Frame ${i} detected ${chairCount} chairs`);
       } catch (error) {
         console.error("Error during chair detection:", error);
       }
+      // Wait a bit before processing the next frame.
       await new Promise((resolve) => setTimeout(resolve, delayBetweenFrames));
     }
+
     if (detectionCanceledRef.current) {
       setIsDetecting(false);
       return;
     }
+
+    // Aggregate the results (find the most frequently detected chair count).
     const frequency: { [key: number]: number } = {};
     detectionResults.forEach((count) => {
       frequency[count] = (frequency[count] || 0) + 1;
@@ -497,6 +518,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     setIsDetecting(false);
     setShowChairDetectionPrompt(true);
   };
+
 
 
   // Handler for when the user clicks "Yes" on the detection prompt.
