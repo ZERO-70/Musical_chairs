@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.MusicalChairs",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,7 +47,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "f0187618-a170-4d4f-a69b-a4fbab6d76b9"
+        "projectId": "d66a73f6-c269-476a-9cb2-df51875c43e9"
       }
     }
   }

@@ -15,7 +15,6 @@ import { Audio, Video, ResizeMode } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import LottieView from "lottie-react-native";
-import {  loadModel, detectChairs  } from "../services/LocalInference"; // Import the local inference function
 
 // Custom hook to manage timeouts.
 function useTimeoutManager() {
@@ -70,14 +69,14 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
   // Ref used as a cancellation token for detection.
   const detectionCanceledRef = useRef<boolean>(false);
 
-  const [cameraFacing, setCameraFacing] = useState<"front" | "back">("back");
+  const [cameraFacing, setCameraFacing] = useState<"front" | "back">("front");
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isActive, setIsActive] = useState<boolean>(false);
   const [showWarning, setShowWarning] = useState<boolean>(false);
   // State for showing the number selector overlay.
   const [showNumberSelector, setShowNumberSelector] = useState<boolean>(false);
   // The selected number (number of chairs)
-  const [selectedNumber, setSelectedNumber] = useState<number>(1);
+  const [selectedNumber, setSelectedNumber] = useState<number>(0);
   // State for game over (when chairs reach zero)
   const [gameOver, setGameOver] = useState<boolean>(false);
   // Animated values for countdown
@@ -90,6 +89,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
   const [detectedChairCount, setDetectedChairCount] = useState<number | null>(null);
   const [showChairDetectionPrompt, setShowChairDetectionPrompt] = useState<boolean>(false);
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
+  const [showPhoneImage, setShowPhoneImage] = useState(false);
   // New state for the sit–stand error message.
   const [showNotFilledMessage, setShowNotFilledMessage] = useState<boolean>(false);
 
@@ -207,9 +207,10 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
   function startSettleCountdown() {
     // Start concurrent sit–stand detection (2 frames/sec for 10 sec => 20 frames)
+    /*
     const sitStandDetectionPromise = (async () => {
       let detectionResults: number[] = [];
-      const totalFrames = 3;
+      const totalFrames = 0;
       setIsDetecting(true);
       for (let i = 0; i < totalFrames; i++) {
         if (detectionCanceledRef.current) {
@@ -233,7 +234,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
             } as any);
             // Send image to the /sitstand endpoint for sit or stand detection.
             const response = await fetch(
-              "https://a93e-124-29-253-131.ngrok-free.app/sitstand",
+              "https://f754-154-80-14-143.ngrok-free.app/sitstand",
               {
                 method: "POST",
                 body: formData,
@@ -257,17 +258,39 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
       }
       return detectionResults;
     })();
+     */
 
     // Clear any existing countdown interval.
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
     }
-    setCountdown(10);
-    let count = 10;
+    setCountdown(3);
+    let count = 3;
     countdownIntervalRef.current = setInterval(() => {
       count -= 1;
       console.log("Settle Countdown:", count);
+      let a = 0;
+      setSelectedNumber((prev) => {
+        a = prev;
+        return prev;
+      });
+      console.log("nani ka number " ,a);
+      if (count === 0){
+        console.log("nani bhai choti ice cream");
+        (async () => {
+          const picture = await cameraRef.current?.takePictureAsync({
+            quality: 0.5,
+            base64: false,
+          });
+          if (picture) {
+            console.log("nani bhai ice cream");
+            // Save the last captured image URI for later display.
+            setLastDetectionImageUri(picture.uri);
+          }
+
+        })();
+      }
       if (count < 0) {
         if (countdownIntervalRef.current) {
           clearInterval(countdownIntervalRef.current);
@@ -276,6 +299,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
         setCountdown(null);
 
         // Process the sit–stand detection results.
+        /*
         sitStandDetectionPromise.then((results) => {
           // Tally the frequency of sitting counts.
           const frequency: { [key: number]: number } = {};
@@ -384,6 +408,47 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
             return newCount;
           });
         });
+         */
+        setSelectedNumber((prev) => {
+          const newCount = prev - 1;
+        if (newCount == 1) {
+          setGameOver(true);
+          if (soundRef.current) {
+            soundRef.current.stopAsync();
+          }
+          clearAllTimeouts();
+          setManagedTimeout(() => {
+            resetGame();
+          }, 5000);
+        } else {
+          (async () => {
+            console.log("Playing warning sound...");
+            setShowWarning(true);
+            const {sound: warningSound} = await Audio.Sound.createAsync(
+                require("../../assets/danger.mp3"),
+                {shouldPlay: true}
+            );
+            //storing the refrence of the warning sound
+            warningSoundRef.current = warningSound;
+            await waitForSoundToFinish(warningSound);
+            await warningSound.unloadAsync();
+            setShowWarning(false);
+            if (soundRef.current) {
+              const status = await soundRef.current.getStatusAsync();
+              if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
+                await soundRef.current.playAsync();
+                console.log("Music resumed.");
+                // Schedule next random stop.
+                const randomDelay = Math.floor(Math.random() * 10000) + 10000;
+                setManagedTimeout(randomStop, randomDelay);
+              }
+            }
+          })();
+        }
+          return newCount;
+        });
+
+
       } else {
         setCountdown(count);
         animateCountdown();
@@ -444,6 +509,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
       console.error("Camera not ready");
       return;
     }
+    /*
     detectionCanceledRef.current = false;
     setIsDetecting(true);
     let detectionResults: number[] = [];
@@ -465,7 +531,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
           type: "image/jpeg",
           name: "photo.jpg",
         } as any);
-        const response = await fetch("https://5b37-103-4-94-109.ngrok-free.app/object", {
+        const response = await fetch("https://f754-154-80-14-143.ngrok-free.app/object", {
           method: "POST",
           body: formData,
           headers: { "Content-Type": "multipart/form-data" },
@@ -494,8 +560,10 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
       }
     }
     setDetectedChairCount(mostFrequentCount);
+     */
     setIsDetecting(false);
-    setShowChairDetectionPrompt(true);
+    //setShowChairDetectionPrompt(true);
+    handleEnterManually();
   };
 
 
@@ -621,20 +689,38 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
   if (showIntroVideo) {
     return (
-      <View style={styles.videoContainer}>
-        <Video
-          source={require("../../assets/intro.mp4")}
-          style={styles.video}
-          shouldPlay
-          resizeMode={ResizeMode.COVER}
-          onPlaybackStatusUpdate={(status) => {
-            if (status.isLoaded && status.didJustFinish) {
-              ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-              setShowIntroVideo(false);
-            }
-          }}
-        />
-      </View>
+        <View style={styles.videoContainer}>
+          <Video
+              source={require("../../assets/intro.mp4")}
+              style={styles.video}
+              shouldPlay
+              resizeMode={ResizeMode.COVER}
+              onPlaybackStatusUpdate={(status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                  ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+                  setShowIntroVideo(false);
+                  setShowPhoneImage(true);
+
+                  // Hide the image after 3 seconds
+                  setTimeout(() => {
+                    setShowPhoneImage(false);
+                  }, 3000);
+                }
+              }}
+          />
+        </View>
+    );
+  }
+
+  if (showPhoneImage) {
+    return (
+        <View style={styles.imageContainer}>
+          <Image
+              source={require("../../assets/put_phone.jpg")}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+          />
+        </View>
     );
   }
 
@@ -728,11 +814,11 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
             onMomentumScrollEnd={(event) => {
               const offsetY = event.nativeEvent.contentOffset.y;
               const index = Math.round(offsetY / SNAP_INTERVAL);
-              setSelectedNumber(index + 1);
+              setSelectedNumber(index + 3);
             }}
           >
-            {Array.from({ length: 20 }).map((_, index) => {
-              const number = index + 1;
+            {Array.from({ length: 10 }).map((_, index) => {
+              const number = index + 3;
               const isSelected = number === selectedNumber;
               return (
                 <TouchableOpacity
@@ -745,6 +831,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
                   }}
                 >
                   <View style={[styles.numberItem, isSelected && styles.selectedNumberItem]}>
+                    <Image source={require("../../assets/user.png")} style={styles.chairIcon} />
                     <Text style={[styles.numberText, isSelected && styles.selectedNumberText]}>
                       {number}
                     </Text>
@@ -821,6 +908,16 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  imageContainer: {
+    flex: 1,
+    backgroundColor: "black",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullscreenImage: {
+    width: "100%",
+    height: "80%",
+  },
   switchIcon: { width: 40, height: 40, resizeMode: "contain" },
   camera: { flex: 1, width: "100%" },
   permissionContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
