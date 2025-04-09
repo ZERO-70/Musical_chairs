@@ -419,7 +419,10 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
           clearAllTimeouts();
           setManagedTimeout(() => {
             resetGame();
-          }, 5000);
+            // Activate the game and show the number selector overlay
+            setIsActive(true);
+            setShowNumberSelector(true);
+          }, 12000);
         } else {
           (async () => {
             console.log("Playing warning sound...");
@@ -716,7 +719,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     return (
         <View style={styles.imageContainer}>
           <Image
-              source={require("../../assets/put_phone.jpg")}
+              source={require("../../assets/put_phone.png")}
               style={styles.fullscreenImage}
               resizeMode="contain"
           />
