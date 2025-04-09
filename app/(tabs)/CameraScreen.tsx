@@ -15,6 +15,7 @@ import { Audio, Video, ResizeMode } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import LottieView from "lottie-react-native";
+import { RestartTimer } from "../../components/RestartTimer";
 
 // Custom hook to manage timeouts.
 function useTimeoutManager() {
@@ -99,6 +100,14 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
   const warningSoundRef = useRef<Audio.Sound | null>(null);
 
+  // Add a new state to track when to show the restart timer
+  const [showRestartTimer, setShowRestartTimer] = useState<boolean>(false);
+
+  // Add this after the state declarations
+  const congratsTextFade = useRef(new Animated.Value(1)).current;
+
+  // Add a new state for original chair count
+  const [originalChairCount, setOriginalChairCount] = useState<number>(0);
 
   // Helper: Wait for a sound to finish playing.
   const waitForSoundToFinish = (sound: Audio.Sound) => {
@@ -417,12 +426,13 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
             soundRef.current.stopAsync();
           }
           clearAllTimeouts();
-          setManagedTimeout(() => {
-            resetGame();
-            // Activate the game and show the number selector overlay
-            setIsActive(true);
-            setShowNumberSelector(true);
-          }, 12000);
+          // Remove this setTimeout since we're using the RestartTimer component now
+          // setManagedTimeout(() => {
+          //   resetGame();
+          //   // Activate the game and show the number selector overlay
+          //   setIsActive(true);
+          //   setShowNumberSelector(true);
+          // }, 12000);
         } else {
           (async () => {
             console.log("Playing warning sound...");
@@ -574,6 +584,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
   const handleYesDetection = () => {
     if (detectedChairCount !== null) {
       setSelectedNumber(detectedChairCount);
+      setOriginalChairCount(detectedChairCount);
     }
     setShowChairDetectionPrompt(false);
     startGameCountdown();
@@ -613,6 +624,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
         setCountdown(null);
         setGameOver(false);
         setSelectedNumber(0);
+        setOriginalChairCount(0);
 
     } else {
       setIsActive(true);
@@ -646,6 +658,9 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     setSelectedNumber(0);
     clearAllTimeouts();
     setLastDetectionImageUri(null);
+    setShowRestartTimer(false);
+    // Reset the animation value for next time
+    congratsTextFade.setValue(1);
   };
 
   useFocusEffect(
@@ -777,14 +792,48 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
       {/* Game Over Overlay */}
       {gameOver && (
-  <View style={styles.gameOverOverlay}>
-    {lastDetectionImageUri && (
-      <Image source={{ uri: lastDetectionImageUri }} style={styles.gameOverImage} />
-    )}
-    <Text style={styles.gameOverText}>Congratulations Winner</Text>
-  </View>
-)}
-
+        <View style={styles.gameOverOverlay}>
+          {!showRestartTimer && lastDetectionImageUri && (
+            <Animated.Image 
+              source={{ uri: lastDetectionImageUri }} 
+              style={[styles.gameOverImage, { opacity: congratsTextFade }]} 
+            />
+          )}
+          {!showRestartTimer ? (
+            <Animated.Text 
+              style={[styles.gameOverText, { opacity: congratsTextFade }]}
+              onLayout={() => {
+                // Start fading out after 2 seconds
+                setTimeout(() => {
+                  Animated.timing(congratsTextFade, {
+                    toValue: 0,
+                    duration: 1000,
+                    useNativeDriver: true,
+                  }).start(() => {
+                    setShowRestartTimer(true);
+                  });
+                }, 2000);
+              }}
+            >
+              Congratulations Winner
+            </Animated.Text>
+          ) : (
+            <RestartTimer 
+              initialSeconds={5} 
+              onComplete={() => {
+                resetGame();
+                // Set the number of chairs to original count
+                setSelectedNumber(originalChairCount);
+                // Activate the game without showing number selector
+                setIsActive(true);
+                // Start game countdown directly
+                startGameCountdown();
+                setShowRestartTimer(false);
+              }} 
+            />
+          )}
+        </View>
+      )}
 
       {/* Start/Cancel Button */}
       <TouchableOpacity
@@ -829,6 +878,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
                   activeOpacity={0.7}
                   onPress={() => {
                     setSelectedNumber(number);
+                    setOriginalChairCount(number);
                     setShowNumberSelector(false);
                     startGameCountdown();
                   }}
@@ -1058,8 +1108,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     zIndex: 100,
+    padding: 20,
   },
-  gameOverText: { fontSize: 32, color: "white", fontWeight: "bold" },
+  gameOverText: { 
+    fontSize: 32, 
+    color: "white", 
+    fontWeight: "bold",
+    marginBottom: 30,
+    textShadowColor: "#ff1493",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5,
+  },
   detectionOverlay: {
     position: "absolute",
     top: "10%",
