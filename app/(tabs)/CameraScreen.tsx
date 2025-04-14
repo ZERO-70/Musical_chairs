@@ -66,6 +66,8 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
   const soundRef = useRef<Audio.Sound | null>(null);
   // Ref to store the current playback position (in milliseconds)
   const playbackPositionRef = useRef<number>(0);
+  // Ref to hold the countdown sound.
+  const countdownSoundRef = useRef<Audio.Sound | null>(null);
 
   // Ref used as a cancellation token for detection.
   const detectionCanceledRef = useRef<boolean>(false);
@@ -121,6 +123,35 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     });
   };
 
+  // Function to play the countdown sound
+  const playCountdownSound = async (startFromPosition: number = 0) => {
+    try {
+      // Stop previous countdown sound if playing
+      if (countdownSoundRef.current) {
+        await countdownSoundRef.current.stopAsync();
+        await countdownSoundRef.current.unloadAsync();
+      }
+      
+      // Create and play new countdown sound
+      const { sound } = await Audio.Sound.createAsync(
+        require("../../assets/sounds/countdown.mp3"),
+        { shouldPlay: false } // Don't play immediately so we can set the position first
+      );
+      
+      // If startFromPosition is provided, start playback from that position (in milliseconds)
+      if (startFromPosition > 0) {
+        await sound.setPositionAsync(startFromPosition);
+      }
+      
+      // Now play the sound
+      await sound.playAsync();
+      
+      countdownSoundRef.current = sound;
+    } catch (error) {
+      console.error("Error playing countdown sound:", error);
+    }
+  };
+
   useEffect(() => {
     if (!permission?.granted) {
       requestPermission();
@@ -137,25 +168,59 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
   // Function to change the song
   const changeSong = async () => {
-    songIndex = (songIndex + 1) % songs.length;
-    console.log("Changed song to:", songs[songIndex]);
-    if (soundRef.current) {
-      soundRef.current.stopAsync();
-      soundRef.current.unloadAsync();
-      soundRef.current = null;
-      playbackPositionRef.current = 0;
-      const songPaths: { [key: string]: any } = {
-        "song1.mp3": require("../../assets/song1.mp3"),
-        "song2.mp3": require("../../assets/song2.mp3"),
-        "song3.mp3": require("../../assets/song3.mp3"),
-        "song4.mp3": require("../../assets/song4.mp3"),
-        // Add other songs here
-      };
-      const { sound: newSound } = await Audio.Sound.createAsync(
-          songPaths[songs[songIndex]],
-          { shouldPlay: true }
-      );
-      soundRef.current = newSound;
+    try {
+      // First, clear any scheduled timeouts to prevent unexpected behavior
+      clearAllTimeouts();
+      
+      // Update song index
+      songIndex = (songIndex + 1) % songs.length;
+      console.log("Changed song to:", songs[songIndex]);
+      
+      // Clean up existing sound
+      if (soundRef.current) {
+        // Get current playback state
+        const status = await soundRef.current.getStatusAsync();
+        const wasPlaying = status.isLoaded && status.isPlaying;
+        
+        try {
+          console.log("Stopping and unloading previous song...");
+          await soundRef.current.stopAsync();
+          await soundRef.current.unloadAsync();
+        } catch (error) {
+          console.error("Error cleaning up previous song:", error);
+        }
+        // Always nullify the reference after attempting to unload
+        soundRef.current = null;
+        playbackPositionRef.current = 0;
+        
+        // If the game is active and a song was playing, start the new one
+        if (wasPlaying && isActive) {
+          const songPaths: { [key: string]: any } = {
+            "song1.mp3": require("../../assets/sounds/song1.mp3"),
+            "song2.mp3": require("../../assets/sounds/song2.mp3"),
+            "song3.mp3": require("../../assets/sounds/song3.mp3"),
+            "song4.mp3": require("../../assets/sounds/song4.mp3"),
+          };
+          
+          try {
+            console.log("Creating and playing new song...");
+            const { sound: newSound } = await Audio.Sound.createAsync(
+              songPaths[songs[songIndex]],
+              { shouldPlay: true }
+            );
+            soundRef.current = newSound;
+            
+            // Schedule the next random stop
+            const randomDelay = Math.floor(Math.random() * 10000) + 10000;
+            console.log("Scheduling random stop in", randomDelay, "ms");
+            setManagedTimeout(randomStop, randomDelay);
+          } catch (error) {
+            console.error("Error starting new song:", error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error in changeSong:", error);
     }
   };
 
@@ -174,10 +239,10 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
         await soundRef.current.playAsync();
       } else {
         const songPaths: { [key: string]: any } = {
-          "song1.mp3": require("../../assets/song1.mp3"),
-          "song2.mp3": require("../../assets/song2.mp3"),
-          "song3.mp3": require("../../assets/song3.mp3"),
-          "song4.mp3": require("../../assets/song4.mp3"),
+          "song1.mp3": require("../../assets/sounds/song3.mp3"),
+          "song2.mp3": require("../../assets/sounds/song2.mp3"),
+          "song3.mp3": require("../../assets/sounds/song1.mp3"),
+          "song4.mp3": require("../../assets/sounds/song4.mp3"),
           // Add other songs here
         };
         const { sound: newSound } = await Audio.Sound.createAsync(
@@ -215,67 +280,20 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
   }
 
   function startSettleCountdown() {
-    // Start concurrent sit–stand detection (2 frames/sec for 10 sec => 20 frames)
-    /*
-    const sitStandDetectionPromise = (async () => {
-      let detectionResults: number[] = [];
-      const totalFrames = 0;
-      setIsDetecting(true);
-      for (let i = 0; i < totalFrames; i++) {
-        if (detectionCanceledRef.current) {
-          console.log("Sit–stand detection canceled at frame", i);
-          break;
-        }
-        try {
-          const picture = await cameraRef.current?.takePictureAsync({
-            quality: 0.5,
-            base64: false,
-          });
-          if (picture) {
-            // Save the last captured image URI for later display.
-            setLastDetectionImageUri(picture.uri);
-
-            const formData = new FormData();
-            formData.append("image", {
-              uri: picture.uri,
-              type: "image/jpeg",
-              name: "photo.jpg",
-            } as any);
-            // Send image to the /sitstand endpoint for sit or stand detection.
-            const response = await fetch(
-              "https://f754-154-80-14-143.ngrok-free.app/sitstand",
-              {
-                method: "POST",
-                body: formData,
-                headers: { "Content-Type": "multipart/form-data" },
-              }
-            );
-            const json = await response.json();
-            // Count the number of detections with status "Sitting"
-            let sittingCount = 0;
-            if (json.detections && Array.isArray(json.detections)) {
-              json.detections.forEach((det: any) => {
-                if (det.status === "Sitting") sittingCount++;
-              });
-            }
-            detectionResults.push(sittingCount);
-          }
-        } catch (error) {
-          console.error("Error during sit–stand detection:", error);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500)); // 2 frames per sec
-      }
-      return detectionResults;
-    })();
-     */
-
     // Clear any existing countdown interval.
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
     }
+    
+    // Start with a countdown of 3
     setCountdown(3);
     let count = 3;
+    
+    // Play the countdown sound starting from the 1-second mark (1000 milliseconds)
+    // This way, the 4-second sound will play only its last 3 seconds, perfectly matching our 3-second countdown
+    playCountdownSound(500);
+    
     countdownIntervalRef.current = setInterval(() => {
       count -= 1;
       console.log("Settle Countdown:", count);
@@ -307,117 +325,6 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
         countdownIntervalRef.current = null;
         setCountdown(null);
 
-        // Process the sit–stand detection results.
-        /*
-        sitStandDetectionPromise.then((results) => {
-          // Tally the frequency of sitting counts.
-          const frequency: { [key: number]: number } = {};
-          results.forEach((num) => {
-            frequency[num] = (frequency[num] || 0) + 1;
-          });
-          let mostFrequentSitting: number | null = null;
-          let maxFreq = 0;
-          for (const key in frequency) {
-            if (frequency[+key] > maxFreq) {
-              mostFrequentSitting = +key;
-              maxFreq = frequency[+key];
-            }
-          }
-          console.log("Most frequent sitting count:", mostFrequentSitting);
-          setIsDetecting(false);
-
-          // Deduct one chair every time the settle countdown ends.
-          setSelectedNumber((prev) => {
-            const newCount = prev - 1;
-
-            // If the detected sitting count doesn't match the current number of chairs,
-            // show an error message.
-            console.log(newCount)
-            if (mostFrequentSitting !== (newCount+1)) {
-              setShowNotFilledMessage(true);
-              setManagedTimeout(() => {
-                setShowNotFilledMessage(false);
-                if (newCount < 1) {
-                  setGameOver(true);
-                  if (soundRef.current) {
-                    soundRef.current.stopAsync();
-                  }
-                  clearAllTimeouts();
-                  setManagedTimeout(() => {
-                    resetGame();
-                  }, 5000);
-                } else {
-
-
-                    // Check if no chairs remain.
-                  // If chairs remain, play the warning sound and resume music.
-                  (async () => {
-                    console.log("Playing warning sound...");
-                    setShowWarning(true);
-                    const { sound: warningSound } = await Audio.Sound.createAsync(
-                      require("../../assets/danger.mp3"),
-                      { shouldPlay: true }
-                    );
-                    //storing the refrence of the warning sound
-                    warningSoundRef.current = warningSound;
-                    await waitForSoundToFinish(warningSound);
-                    await warningSound.unloadAsync();
-                    setShowWarning(false);
-                    if (soundRef.current) {
-                      const status = await soundRef.current.getStatusAsync();
-                      if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
-                        await soundRef.current.playAsync();
-                        console.log("Music resumed.");
-                        // Schedule next random stop.
-                        const randomDelay = Math.floor(Math.random() * 10000) + 10000;
-                        setManagedTimeout(randomStop, randomDelay);
-                      }
-                    }
-                  })();
-                }
-              }, 3000);
-            }
-            else {
-              if (newCount < 1) {
-                  setGameOver(true);
-                  if (soundRef.current) {
-                    soundRef.current.stopAsync();
-                  }
-                  clearAllTimeouts();
-                  setManagedTimeout(() => {
-                    resetGame();
-                  }, 5000);
-                } else {
-                  // Check if no chairs remain.
-                  // If chairs remain, play the warning sound and resume music.
-                  (async () => {
-                    console.log("Playing warning sound...");
-                    setShowWarning(true);
-                    const { sound: warningSound } = await Audio.Sound.createAsync(
-                      require("../../assets/danger.mp3"),
-                      { shouldPlay: true }
-                    );
-                    await waitForSoundToFinish(warningSound);
-                    await warningSound.unloadAsync();
-                    setShowWarning(false);
-                    if (soundRef.current) {
-                      const status = await soundRef.current.getStatusAsync();
-                      if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
-                        await soundRef.current.playAsync();
-                        console.log("Music resumed.");
-                        // Schedule next random stop.
-                        const randomDelay = Math.floor(Math.random() * 10000) + 10000;
-                        setManagedTimeout(randomStop, randomDelay);
-                      }
-                    }
-                  })();
-                }
-            }
-
-            return newCount;
-          });
-        });
-         */
         setSelectedNumber((prev) => {
           const newCount = prev - 1;
         if (newCount == 1) {
@@ -426,19 +333,12 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
             soundRef.current.stopAsync();
           }
           clearAllTimeouts();
-          // Remove this setTimeout since we're using the RestartTimer component now
-          // setManagedTimeout(() => {
-          //   resetGame();
-          //   // Activate the game and show the number selector overlay
-          //   setIsActive(true);
-          //   setShowNumberSelector(true);
-          // }, 12000);
         } else {
           (async () => {
             console.log("Playing warning sound...");
             setShowWarning(true);
             const {sound: warningSound} = await Audio.Sound.createAsync(
-                require("../../assets/danger.mp3"),
+                require("../../assets/sounds/danger.mp3"),
                 {shouldPlay: true}
             );
             //storing the refrence of the warning sound
@@ -495,9 +395,19 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     }
     let count = 5;
     setCountdown(count);
+    // Don't play countdown sound immediately, wait until count reaches 4
+    
     countdownIntervalRef.current = setInterval(() => {
       count -= 1;
       console.log("Game Countdown:", count);
+      
+      // Play countdown sound when the count reaches 4 (with a small delay to synchronize better)
+      if (count === 4) {
+        setTimeout(() => {
+          playCountdownSound();
+        }, 1000); // 1-second delay
+      }
+      
       if (count < 0) {
         if (countdownIntervalRef.current) {
           clearInterval(countdownIntervalRef.current);
@@ -522,60 +432,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
       console.error("Camera not ready");
       return;
     }
-    /*
-    detectionCanceledRef.current = false;
-    setIsDetecting(true);
-    let detectionResults: number[] = [];
-    const totalFrames = 1;
-    const delayBetweenFrames = 1000 / 4; 
-    for (let i = 0; i < totalFrames; i++) {
-      if (detectionCanceledRef.current) {
-        console.log("Chair detection canceled at frame", i);
-        break;
-      }
-      try {
-        const picture = await cameraRef.current.takePictureAsync({
-          quality: 0.5,
-          base64: false,
-        });
-        const formData = new FormData();
-        formData.append("image", {
-          uri: picture.uri,
-          type: "image/jpeg",
-          name: "photo.jpg",
-        } as any);
-        const response = await fetch("https://f754-154-80-14-143.ngrok-free.app/object", {
-          method: "POST",
-          body: formData,
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-        const json = await response.json();
-        detectionResults.push(json.chair_count);
-      } catch (error) {
-        console.error("Error during chair detection:", error);
-      }
-      await new Promise((resolve) => setTimeout(resolve, delayBetweenFrames));
-    }
-    if (detectionCanceledRef.current) {
-      setIsDetecting(false);
-      return;
-    }
-    const frequency: { [key: number]: number } = {};
-    detectionResults.forEach((count) => {
-      frequency[count] = (frequency[count] || 0) + 1;
-    });
-    let mostFrequentCount: number | null = null;
-    let maxFrequency = 0;
-    for (const count in frequency) {
-      if (frequency[+count] > maxFrequency) {
-        mostFrequentCount = +count;
-        maxFrequency = frequency[+count];
-      }
-    }
-    setDetectedChairCount(mostFrequentCount);
-     */
     setIsDetecting(false);
-    //setShowChairDetectionPrompt(true);
     handleEnterManually();
   };
 
@@ -709,7 +566,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     return (
         <View style={styles.videoContainer}>
           <Video
-              source={require("../../assets/intro.mp4")}
+              source={require("../../assets/videos/intro.mp4")}
               style={styles.video}
               shouldPlay
               resizeMode={ResizeMode.COVER}
@@ -734,7 +591,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
     return (
         <View style={styles.imageContainer}>
           <Image
-              source={require("../../assets/put_phone.png")}
+              source={require("../../assets/icons/put_phone.png")}
               style={styles.fullscreenImage}
               resizeMode="contain"
           />
@@ -771,7 +628,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
 
       {/* Back Button */}
       <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-        <Image source={require("../../assets/reply.png")} style={styles.backIcon} />
+        <Image source={require("../../assets/icons/reply.png")} style={styles.backIcon} />
       </TouchableOpacity>
 
       {/* Countdown Display */}
@@ -840,17 +697,17 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
         style={[styles.startButton, isActive ? { backgroundColor: "rgba(255, 0, 0, 0.3)" } : {}]}
         onPress={handleStartCancel}
       >
-        <Image source={isActive ? require("../../assets/close.png") : require("../../assets/play.png")} style={styles.startIcon} />
+        <Image source={isActive ? require("../../assets/icons/close.png") : require("../../assets/icons/play.png")} style={styles.startIcon} />
       </TouchableOpacity>
 
       {/* Camera Toggle Button */}
       <TouchableOpacity style={styles.toggleButton} onPress={toggleCamera}>
-        <Image source={require("../../assets/switch-camera.png")} style={styles.switchIcon} />
+        <Image source={require("../../assets/icons/switch-camera.png")} style={styles.switchIcon} />
       </TouchableOpacity>
 
       {/* song Toggle Button */}
       <TouchableOpacity style={styles.songtoggleButton} onPress={changeSong}>
-        <Image source={require("../../assets/playlist.png")} style={styles.songswitchicon} />
+        <Image source={require("../../assets/icons/playlist.png")} style={styles.songswitchicon} />
       </TouchableOpacity>
 
 
@@ -884,7 +741,7 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
                   }}
                 >
                   <View style={[styles.numberItem, isSelected && styles.selectedNumberItem]}>
-                    <Image source={require("../../assets/user.png")} style={styles.chairIcon} />
+                    <Image source={require("../../assets/icons/user.png")} style={styles.chairIcon} />
                     <Text style={[styles.numberText, isSelected && styles.selectedNumberText]}>
                       {number}
                     </Text>
@@ -893,14 +750,14 @@ const [lastDetectionImageUri, setLastDetectionImageUri] = useState<string | null
               );
             })}
           </ScrollView>
-          <Image source={require("../../assets/down-arrow.png")} style={styles.downArrowIcon} />
+          <Image source={require("../../assets/icons/down-arrow.png")} style={styles.downArrowIcon} />
         </View>
       )}
 
       {/* Display selected number with chair icon */}
       {isActive && !showNumberSelector && (
         <View style={styles.selectedNumberDisplay}>
-          <Image source={require("../../assets/chair.png")} style={styles.chairIcon} />
+          <Image source={require("../../assets/icons/chair.png")} style={styles.chairIcon} />
           <Text style={styles.selectedNumberText}>{selectedNumber}</Text>
         </View>
       )}
