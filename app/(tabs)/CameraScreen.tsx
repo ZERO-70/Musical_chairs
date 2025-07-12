@@ -15,7 +15,7 @@ import { Audio, Video, ResizeMode } from "expo-av";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import LottieView from "lottie-react-native";
-import { loadYoloModel,runLocalInference } from '@/modelLoader';
+import { loadYoloModel,runLocalInference, visualizeTensorAsASCII, imageToTensor, DetectionResult, convertToPixelCoords, detectWinner, WinnerDetectionResult } from '@/modelLoader';
 import * as ort from 'onnxruntime-react-native';
 
 // Custom hook to manage timeouts.
@@ -47,6 +47,8 @@ const ITEM_MARGIN = 10;
 const SNAP_INTERVAL = ITEM_HEIGHT + ITEM_MARGIN * 2;
 
 let songIndex = 0;
+// Global variable to store the previous number of chairs for game restart
+let previousChairCount = 0;
 
 export default function CameraScreen() {
   const router = useRouter();
@@ -87,12 +89,23 @@ export default function CameraScreen() {
   // State for showing the intro video.
   const [showIntroVideo, setShowIntroVideo] = useState<boolean>(true);
 
-  // New states for chair detection.
-  const [detectedChairCount, setDetectedChairCount] = useState<number | null>(null);
-  const [showChairDetectionPrompt, setShowChairDetectionPrompt] = useState<boolean>(false);
+  // New states for person detection to determine chair count.
+  const [detectedPersonCount, setDetectedPersonCount] = useState<number | null>(null);
+  const [showPersonDetectionPrompt, setShowPersonDetectionPrompt] = useState<boolean>(false);
+  const [detectionVisualization, setDetectionVisualization] = useState<string | null>(null);
+  const [showDetectionVisualization, setShowDetectionVisualization] = useState<boolean>(false);
+  const [detectionBboxes, setDetectionBboxes] = useState<DetectionResult['detections']>([]);
+  const [imageSize, setImageSize] = useState<{width: number, height: number}>({width: 300, height: 200});
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
   // New state for the sit–stand error message.
   const [showNotFilledMessage, setShowNotFilledMessage] = useState<boolean>(false);
+  // New state for game over countdown
+  const [gameOverCountdown, setGameOverCountdown] = useState<number | null>(null);
+  // New state for not enough players error
+  const [showNotEnoughPlayersError, setShowNotEnoughPlayersError] = useState<boolean>(false);
+  // New state for winner detection
+  const [winnerDetectionResult, setWinnerDetectionResult] = useState<WinnerDetectionResult | null>(null);
+  const [isDetectingWinner, setIsDetectingWinner] = useState<boolean>(false);
 
   // Reference for the vertical ScrollView.
   const scrollViewRef = useRef<ScrollView>(null);
@@ -222,7 +235,7 @@ export default function CameraScreen() {
 
   function startSettleCountdown() {
     // Start concurrent sit–stand detection (2 frames/sec for 10 sec => 20 frames)
-    const sitStandDetectionPromise = (async () => {
+    /*const sitStandDetectionPromise = (async () => {
       let detectionResults: number[] = [];
       const totalFrames = 3;
       setIsDetecting(true);
@@ -271,7 +284,7 @@ export default function CameraScreen() {
         await new Promise((resolve) => setTimeout(resolve, 500)); // 2 frames per sec
       }
       return detectionResults;
-    })();
+    })();*/
 
     // Clear any existing countdown interval.
     if (countdownIntervalRef.current) {
@@ -291,7 +304,8 @@ export default function CameraScreen() {
         setCountdown(null);
 
         // Process the sit–stand detection results.
-        sitStandDetectionPromise.then((results) => {
+        
+        /*sitStandDetectionPromise.then((results) => {
           // Tally the frequency of sitting counts.
           const frequency: { [key: number]: number } = {};
           results.forEach((num) => {
@@ -305,6 +319,9 @@ export default function CameraScreen() {
               maxFreq = frequency[+key];
             }
           }
+            */
+          let mostFrequentSitting = 0;
+
           console.log("Most frequent sitting count:", mostFrequentSitting);
           setIsDetecting(false);
 
@@ -315,7 +332,7 @@ export default function CameraScreen() {
             // If the detected sitting count doesn't match the current number of chairs,
             // show an error message.
             console.log(newCount)
-            if (mostFrequentSitting !== (newCount+1)) {
+            if (false && mostFrequentSitting !== (newCount+1)) {
               setShowNotFilledMessage(true);
               setManagedTimeout(() => {
                 setShowNotFilledMessage(false);
@@ -326,8 +343,8 @@ export default function CameraScreen() {
                   }
                   clearAllTimeouts();
                   setManagedTimeout(() => {
-                    resetGame();
-                  }, 5000);
+                    startGameOverCountdown();
+                  }, 3000); // Wait 3 seconds to show "Congratulations Winner" before starting countdown
                 } else {
 
 
@@ -361,14 +378,41 @@ export default function CameraScreen() {
             }
             else {
               if (newCount < 1) {
+                  // Game is over, detect the winner before showing congratulations
                   setGameOver(true);
                   if (soundRef.current) {
                     soundRef.current.stopAsync();
                   }
                   clearAllTimeouts();
-                  setManagedTimeout(() => {
-                    resetGame();
-                  }, 5000);
+                  
+                  // Start winner detection process
+                  setManagedTimeout(async () => {
+                    await detectGameWinner();
+                  }, 1000); // Wait 1 second after music stops to capture frame
+                } else if (newCount === 1) {
+                  // Only 1 chair remaining - this is the final round!
+                  console.log("🏆 Final round! Only 1 chair remaining.");
+                  (async () => {
+                    console.log("Playing warning sound...");
+                    setShowWarning(true);
+                    const { sound: warningSound } = await Audio.Sound.createAsync(
+                      require("../../assets/danger.mp3"),
+                      { shouldPlay: true }
+                    );
+                    await waitForSoundToFinish(warningSound);
+                    await warningSound.unloadAsync();
+                    setShowWarning(false);
+                    if (soundRef.current) {
+                      const status = await soundRef.current.getStatusAsync();
+                      if ("isLoaded" in status && status.isLoaded && !status.isPlaying) {
+                        await soundRef.current.playAsync();
+                        console.log("Music resumed.");
+                        // Schedule next random stop.
+                        const randomDelay = Math.floor(Math.random() * 10000) + 10000;
+                        setManagedTimeout(randomStop, randomDelay);
+                      }
+                    }
+                  })();
                 } else {
                   // Check if no chairs remain.
                   // If chairs remain, play the warning sound and resume music.
@@ -398,7 +442,7 @@ export default function CameraScreen() {
 
             return newCount;
           });
-        });
+        /*});*/
       } else {
         setCountdown(count);
         animateCountdown();
@@ -422,6 +466,40 @@ export default function CameraScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+  };
+
+  // Function to start the game over countdown (10 seconds) before restarting
+  const startGameOverCountdown = () => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    let count = 10;
+    setGameOverCountdown(count);
+    countdownIntervalRef.current = setInterval(() => {
+      count -= 1;
+      console.log("Game Over Restart Countdown:", count);
+      if (count < 0) {
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+        }
+        countdownIntervalRef.current = null;
+        setGameOverCountdown(null);
+        // Restart the game with the previous chair count
+        restartGameWithSameChairs();
+      } else {
+        setGameOverCountdown(count);
+        animateCountdown();
+      }
+    }, 1000);
+  };
+
+  // Function to restart the game with the same number of chairs
+  const restartGameWithSameChairs = () => {
+    setGameOver(false);
+    setSelectedNumber(previousChairCount);
+    setIsActive(true);
+    startGameCountdown();
   };
 
   // Game countdown (5 seconds) after a number is selected.
@@ -453,8 +531,49 @@ export default function CameraScreen() {
 
   // Chair detection function (unchanged).
 
-  // Chair detection function (unchanged).
-  const startChairDetection = async () => {
+  // Function to detect the winner when the game ends
+  const detectGameWinner = async () => {
+    if (!cameraRef.current || !modelSession) {
+      console.error("Camera or model not ready for winner detection");
+      setManagedTimeout(() => {
+        startGameOverCountdown();
+      }, 3000);
+      return;
+    }
+
+    console.log("🏆 Starting winner detection process...");
+    setIsDetectingWinner(true);
+
+    try {
+      // Run winner detection (handles image capture internally)
+      const winnerResult = await detectWinner(
+        modelSession,
+        cameraRef,
+        3 // Max 3 retries
+      );
+
+      console.log(`🏆 Winner detection result:`, winnerResult);
+      setWinnerDetectionResult(winnerResult);
+      setIsDetectingWinner(false);
+
+      // Show results for 5 seconds before starting countdown
+      setManagedTimeout(() => {
+        startGameOverCountdown();
+      }, 5000);
+
+    } catch (error) {
+      console.error("Error during winner detection:", error);
+      setIsDetectingWinner(false);
+      
+      // Fallback: show generic game over after 3 seconds
+      setManagedTimeout(() => {
+        startGameOverCountdown();
+      }, 3000);
+    }
+  };
+
+  // Person detection function to count players for musical chairs game.
+  const startPersonDetection = async () => {
     if (!cameraRef.current) {
       console.error("Camera not ready");
       return;
@@ -462,6 +581,8 @@ export default function CameraScreen() {
     detectionCanceledRef.current = false;
     setIsDetecting(true);
     let detectionResults: number[] = [];
+    let lastDetectionResult: DetectionResult | null = null;
+    let lastPictureUri: string | null = null;
     const totalFrames = 1; // You can adjust this if you want to sample more frames.
     const delayBetweenFrames = 1000 / 4; // 250ms between frames
 
@@ -486,9 +607,22 @@ export default function CameraScreen() {
         });
 
         // Instead of sending the image to a server, run local inference.
-        const chairCount = await runLocalInference(modelSession, picture.uri);
-        detectionResults.push(chairCount);
-        console.log(`Frame ${i} detected ${chairCount} chairs`);
+        const detectionResult = await runLocalInference(modelSession, picture.uri);
+        const personCount = detectionResult.personCount;
+        
+        // Store the last detection result and image for visualization
+        lastDetectionResult = detectionResult;
+        lastPictureUri = picture.uri;
+        
+        console.log(`🎯 Detection result: ${detectionResult.personCount} persons, ${detectionResult.detections.length} bounding boxes`);
+        
+        // 🔍 OPTIONAL: Add visual tensor validation (uncomment to debug)
+        // console.log("🎨 Visualizing tensor content as ASCII:");
+        // const inputTensor = await imageToTensor(picture.uri);
+        // visualizeTensorAsASCII(inputTensor, 20);
+        
+        detectionResults.push(personCount);
+        console.log(`Frame ${i} detected ${personCount} persons`);
       } catch (error) {
         console.error("Error during chair detection:", error);
       }
@@ -514,19 +648,51 @@ export default function CameraScreen() {
         maxFrequency = frequency[+count];
       }
     }
-    setDetectedChairCount(mostFrequentCount);
+    setDetectedPersonCount(mostFrequentCount);
     setIsDetecting(false);
-    setShowChairDetectionPrompt(true);
+    
+    // Set the visualization image and bounding boxes
+    if (lastPictureUri && lastDetectionResult) {
+      setDetectionVisualization(lastPictureUri);
+      setDetectionBboxes(lastDetectionResult.detections);
+    }
+    
+    setShowPersonDetectionPrompt(true);
   };
 
 
 
   // Handler for when the user clicks "Yes" on the detection prompt.
   const handleYesDetection = () => {
-    if (detectedChairCount !== null) {
-      setSelectedNumber(detectedChairCount);
+    if (detectedPersonCount !== null) {
+      // Check if there are enough players (at least 2)
+      if (detectedPersonCount < 2) {
+        setShowPersonDetectionPrompt(false);
+        setShowNotEnoughPlayersError(true);
+        // Show error for 3 seconds then reset
+        setTimeout(() => {
+          setShowNotEnoughPlayersError(false);
+          resetGame();
+        }, 3000);
+        return;
+      }
+      
+      // In musical chairs, you need 1 less chair than people
+      const chairCount = Math.max(0, detectedPersonCount - 1);
+      setSelectedNumber(chairCount);
+      // Store the chair count for future game restarts
+      previousChairCount = chairCount;
     }
-    setShowChairDetectionPrompt(false);
+    setShowPersonDetectionPrompt(false);
+    
+    // Show visualization for 3 seconds
+    if (detectionVisualization) {
+      setShowDetectionVisualization(true);
+      setTimeout(() => {
+        setShowDetectionVisualization(false);
+      }, 3000);
+    }
+    
     startGameCountdown();
   };
 
@@ -563,26 +729,41 @@ export default function CameraScreen() {
       // Reset the selected number and game over state.
         setCountdown(null);
         setGameOver(false);
+        setGameOverCountdown(null);
+        setShowNotEnoughPlayersError(false);
         setSelectedNumber(0);
+        setWinnerDetectionResult(null);
+        setIsDetectingWinner(false);
 
     } else {
       setIsActive(true);
-      startChairDetection();
+      startPersonDetection();
     }
   };
 
-  // Handlers for the chair detection prompt.
+  // Handlers for the person detection prompt.
   const handleEnterManually = () => {
-    if (detectedChairCount !== null) {
-      setSelectedNumber(detectedChairCount);
+    if (detectedPersonCount !== null) {
+      setSelectedNumber(detectedPersonCount);
+      // Store the chair count for future game restarts
+      previousChairCount = detectedPersonCount;
     }
-    setShowChairDetectionPrompt(false);
+    setShowPersonDetectionPrompt(false);
+    
+    // Show visualization for 3 seconds
+    if (detectionVisualization) {
+      setShowDetectionVisualization(true);
+      setTimeout(() => {
+        setShowDetectionVisualization(false);
+      }, 3000);
+    }
+    
     setShowNumberSelector(true);
   };
 
   const handleRetryDetection = () => {
-    setShowChairDetectionPrompt(false);
-    startChairDetection();
+    setShowPersonDetectionPrompt(false);
+    startPersonDetection();
   };
 
   const toggleCamera = () => {
@@ -594,7 +775,11 @@ export default function CameraScreen() {
     setShowNumberSelector(false);
     setCountdown(null);
     setGameOver(false);
+    setGameOverCountdown(null);
+    setShowNotEnoughPlayersError(false);
     setSelectedNumber(0);
+    setWinnerDetectionResult(null);
+    setIsDetectingWinner(false);
     clearAllTimeouts();
     setLastDetectionImageUri(null);
   };
@@ -701,6 +886,16 @@ export default function CameraScreen() {
         </View>
       )}
 
+      {/* Game Over Countdown Display */}
+      {gameOverCountdown !== null && (
+        <View style={styles.gameOverCountdownContainer}>
+          <Text style={styles.gameOverCountdownLabel}>Game Restarting In:</Text>
+          <Animated.Text style={[styles.gameOverCountdownText, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
+            {gameOverCountdown}
+          </Animated.Text>
+        </View>
+      )}
+
       {/* Warning Overlay */}
       {showWarning && (
         <View style={styles.warningContainer}>
@@ -708,13 +903,52 @@ export default function CameraScreen() {
         </View>
       )}
 
+      {/* Not Enough Players Error Overlay */}
+      {showNotEnoughPlayersError && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>NOT ENOUGH PLAYERS</Text>
+        </View>
+      )}
+
       {/* Game Over Overlay */}
       {gameOver && (
   <View style={styles.gameOverOverlay}>
-    {lastDetectionImageUri && (
-      <Image source={{ uri: lastDetectionImageUri }} style={styles.gameOverImage} />
+    {isDetectingWinner && (
+      <View style={styles.winnerDetectionContainer}>
+        <LottieView
+          source={require("../../assets/loading.json")}
+          autoPlay
+          loop
+          style={styles.winnerDetectionLottie}
+        />
+        <Text style={styles.winnerDetectionText}>Detecting Winner...</Text>
+      </View>
     )}
-    <Text style={styles.gameOverText}>Congratulations Winner</Text>
+    {!isDetectingWinner && winnerDetectionResult && (
+      <>
+        {winnerDetectionResult.success && winnerDetectionResult.winnerImage ? (
+          <Image source={{ uri: winnerDetectionResult.winnerImage }} style={styles.winnerImage} />
+        ) : (
+          winnerDetectionResult.fullImage && (
+            <Image source={{ uri: winnerDetectionResult.fullImage }} style={styles.gameOverImage} />
+          )
+        )}
+        <Text style={styles.gameOverText}>
+          {winnerDetectionResult.success ? "🏆 Congratulations Winner!" : "Congratulations Winner!"}
+        </Text>
+        {winnerDetectionResult.success && winnerDetectionResult.confidence && (
+          <Text style={styles.winnerConfidenceText}>
+            Detected with {(winnerDetectionResult.confidence * 100).toFixed(0)}% confidence
+          </Text>
+        )}
+      </>
+    )}
+    {!isDetectingWinner && !winnerDetectionResult && lastDetectionImageUri && (
+      <>
+        <Image source={{ uri: lastDetectionImageUri }} style={styles.gameOverImage} />
+        <Text style={styles.gameOverText}>Congratulations Winner</Text>
+      </>
+    )}
   </View>
 )}
 
@@ -750,7 +984,10 @@ export default function CameraScreen() {
             onMomentumScrollEnd={(event) => {
               const offsetY = event.nativeEvent.contentOffset.y;
               const index = Math.round(offsetY / SNAP_INTERVAL);
-              setSelectedNumber(index + 1);
+              const selectedNum = index + 1;
+              setSelectedNumber(selectedNum);
+              // Store the chair count for future game restarts
+              previousChairCount = selectedNum;
             }}
           >
             {Array.from({ length: 20 }).map((_, index) => {
@@ -762,6 +999,8 @@ export default function CameraScreen() {
                   activeOpacity={0.7}
                   onPress={() => {
                     setSelectedNumber(number);
+                    // Store the chair count for future game restarts
+                    previousChairCount = number;
                     setShowNumberSelector(false);
                     startGameCountdown();
                   }}
@@ -811,14 +1050,14 @@ export default function CameraScreen() {
       {/* Chair Detection Prompt Modal */}
       <Modal
         transparent
-        visible={showChairDetectionPrompt && !isDetecting}
+        visible={showPersonDetectionPrompt && !isDetecting}
         animationType="fade"
-        onRequestClose={() => setShowChairDetectionPrompt(false)}
+        onRequestClose={() => setShowPersonDetectionPrompt(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalText}>
-              Detected {detectedChairCount} chair{detectedChairCount === 1 ? "" : "s"}.
+              Detected {detectedPersonCount} person{detectedPersonCount === 1 ? "" : "s"} playing.
             </Text>
             <Text style={styles.modalText}>
               Is this the correct number of chairs?
@@ -834,6 +1073,67 @@ export default function CameraScreen() {
                 <Text style={styles.modalButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Detection Visualization Modal */}
+      <Modal
+        transparent
+        visible={showDetectionVisualization}
+        animationType="fade"
+        onRequestClose={() => setShowDetectionVisualization(false)}
+      >
+        <View style={styles.visualizationOverlay}>
+          <View style={styles.visualizationContainer}>
+            <Text style={styles.visualizationTitle}>Person Detection Results</Text>
+            {detectionVisualization && (
+              <View style={styles.imageContainer}>
+                <Image 
+                  source={{ uri: detectionVisualization }} 
+                  style={styles.visualizationImage}
+                  resizeMode="contain"
+                  onLoad={(event) => {
+                    const { width, height } = event.nativeEvent.source;
+                    setImageSize({ width: 300, height: (height * 300) / width });
+                  }}
+                />
+                {/* Render bounding boxes as overlays */}
+                {detectionBboxes.map((detection, index) => {
+                  const pixelCoords = convertToPixelCoords(detection.bbox, imageSize.width, imageSize.height);
+                  return (
+                    <View
+                      key={index}
+                      style={[
+                        styles.boundingBox,
+                        {
+                          left: pixelCoords.x1,
+                          top: pixelCoords.y1,
+                          width: pixelCoords.x2 - pixelCoords.x1,
+                          height: pixelCoords.y2 - pixelCoords.y1,
+                        }
+                      ]}
+                    >
+                      <Text style={styles.confidenceText}>
+                        {(detection.confidence * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+            <Text style={styles.visualizationText}>
+              🎯 {detectedPersonCount} person{detectedPersonCount !== 1 ? 's' : ''} detected
+            </Text>
+            <Text style={styles.visualizationSubtext}>
+              Image will close automatically in 3 seconds...
+            </Text>
+            <TouchableOpacity 
+              style={styles.closeButton} 
+              onPress={() => setShowDetectionVisualization(false)}
+            >
+              <Text style={styles.closeButtonText}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -895,6 +1195,34 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -50 }, { translateY: -50 }],
   },
   countdownText: { fontSize: 120, fontWeight: "bold", color: "rgba(255,255,255,0.8)", justifyContent: "center" },
+  gameOverCountdownContainer: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    transform: [{ translateX: -150 }, { translateY: -75 }],
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    padding: 20,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: "rgba(255, 215, 0, 0.8)",
+    width: 300,
+    height: 150,
+    justifyContent: "center",
+  },
+  gameOverCountdownLabel: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "rgba(255, 215, 0, 1)",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  gameOverCountdownText: {
+    fontSize: 80,
+    fontWeight: "bold",
+    color: "rgba(255, 255, 255, 0.9)",
+    textAlign: "center",
+  },
   warningContainer: {
     position: "absolute",
     top: "50%",
@@ -904,11 +1232,61 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 30,
   },
+  errorContainer: {
+    position: "absolute",
+    top: "50%",
+    left: "30%",
+    transform: [{ translateX: -50 }, { translateY: -50 }],
+    backgroundColor: "rgba(255, 69, 0, 0.5)",
+    padding: 20,
+    borderRadius: 30,
+  },
+  errorText: {
+    color: "#fff",
+    fontSize: 40,
+    fontWeight: "bold",
+    textAlign: "center",
+    textShadowColor: "#ff4500",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 20,
+  },
   gameOverImage: {
     width: "80%",
     height: "50%",
     resizeMode: "contain",
     marginBottom: 20, // optional, for spacing between image and text
+  },
+  winnerImage: {
+    width: "60%",
+    height: "40%",
+    resizeMode: "contain",
+    marginBottom: 20,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: "#FFD700", // Gold border for winner
+  },
+  winnerDetectionContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  winnerDetectionLottie: {
+    width: 150,
+    height: 150,
+  },
+  winnerDetectionText: {
+    fontSize: 24,
+    color: "#FFD700",
+    fontWeight: "bold",
+    marginTop: 10,
+    textAlign: "center",
+  },
+  winnerConfidenceText: {
+    fontSize: 16,
+    color: "#ccc",
+    fontStyle: "italic",
+    marginTop: 10,
+    textAlign: "center",
   },
   warningText: {
     color: "#fff",
@@ -1036,9 +1414,7 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     position: "absolute",
-    top: "-80%", // adjust as needed
-    right: "42%", // adjust as needed
-    opacity: 0.7,
+    top: "-80%" // adjust as needed
   },
   songtoggleButton: {
   position: "absolute",
@@ -1054,5 +1430,81 @@ const styles = StyleSheet.create({
   width: 80,
   height: 80,
   },
-  songswitchicon: { width: 40, height: 40, resizeMode: "contain" }
+  songswitchicon: { width: 40, height: 40, resizeMode: "contain" },
+  
+  // Detection visualization styles
+  visualizationOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.8)",
+  },
+  visualizationContainer: {
+    backgroundColor: "rgba(40,40,40,0.95)",
+    borderRadius: 20,
+    padding: 20,
+    margin: 20,
+    alignItems: "center",
+    maxWidth: "90%",
+    maxHeight: "80%",
+  },
+  visualizationTitle: {
+    fontSize: 20,
+    color: "white",
+    fontWeight: "bold",
+    marginBottom: 15,
+    textAlign: "center",
+  },
+  imageContainer: {
+    position: "relative",
+    marginBottom: 15,
+  },
+  visualizationImage: {
+    width: 300,
+    height: 200,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#4CAF50",
+  },
+  boundingBox: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "#ff0000",
+    backgroundColor: "transparent",
+  },
+  confidenceText: {
+    position: "absolute",
+    top: -20,
+    left: 0,
+    backgroundColor: "#ff0000",
+    color: "white",
+    fontSize: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 3,
+  },
+  visualizationText: {
+    fontSize: 18,
+    color: "#4CAF50",
+    fontWeight: "bold",
+    marginBottom: 5,
+    textAlign: "center",
+  },
+  visualizationSubtext: {
+    fontSize: 14,
+    color: "#ccc",
+    marginBottom: 15,
+    textAlign: "center",
+  },
+  closeButton: {
+    backgroundColor: "#4CAF50",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  closeButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
 });
