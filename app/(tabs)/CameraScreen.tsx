@@ -734,6 +734,7 @@ export default function CameraScreen() {
         setSelectedNumber(0);
         setWinnerDetectionResult(null);
         setIsDetectingWinner(false);
+        setLastDetectionImageUri(null);
 
     } else {
       setIsActive(true);
@@ -927,7 +928,40 @@ export default function CameraScreen() {
     {!isDetectingWinner && winnerDetectionResult && (
       <>
         {winnerDetectionResult.success && winnerDetectionResult.winnerImage ? (
-          <Image source={{ uri: winnerDetectionResult.winnerImage }} style={styles.winnerImage} />
+          <View style={styles.winnerImageContainer}>
+            <Image 
+              source={{ uri: winnerDetectionResult.winnerImage }} 
+              style={styles.winnerImage}
+              onLoad={(event) => {
+                const { width, height } = event.nativeEvent.source;
+                setImageSize({ width: 300, height: (height * 300) / width });
+              }}
+            />
+            {winnerDetectionResult.winnerBbox && (
+              (() => {
+                const pixelCoords = convertToPixelCoords(
+                  winnerDetectionResult.winnerBbox, 
+                  imageSize.width, 
+                  imageSize.height
+                );
+                return (
+                  <View
+                    style={[
+                      styles.winnerBoundingBox,
+                      {
+                        left: pixelCoords.x1,
+                        top: pixelCoords.y1,
+                        width: pixelCoords.x2 - pixelCoords.x1,
+                        height: pixelCoords.y2 - pixelCoords.y1,
+                      }
+                    ]}
+                  >
+                    <Text style={styles.winnerLabel}>🏆 WINNER!</Text>
+                  </View>
+                );
+              })()
+            )}
+          </View>
         ) : (
           winnerDetectionResult.fullImage && (
             <Image source={{ uri: winnerDetectionResult.fullImage }} style={styles.gameOverImage} />
@@ -1257,8 +1291,8 @@ const styles = StyleSheet.create({
     marginBottom: 20, // optional, for spacing between image and text
   },
   winnerImage: {
-    width: "60%",
-    height: "40%",
+    width: 300,
+    height: 200,
     resizeMode: "contain",
     marginBottom: 20,
     borderRadius: 15,
@@ -1506,5 +1540,30 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  winnerImageContainer: {
+    position: "relative",
+    width: 300,
+    height: 200,
+    marginBottom: 20,
+  },
+  winnerBoundingBox: {
+    position: "absolute",
+    borderWidth: 3,
+    borderColor: "#00FF00", // Green bounding box
+    backgroundColor: "transparent",
+    justifyContent: "flex-start",
+    alignItems: "flex-start",
+  },
+  winnerLabel: {
+    backgroundColor: "#00FF00",
+    color: "#000",
+    fontSize: 12,
+    fontWeight: "bold",
+    padding: 4,
+    borderRadius: 4,
+    position: "absolute",
+    top: -25,
+    left: 0,
   },
 });

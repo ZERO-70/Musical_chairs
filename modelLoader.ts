@@ -224,10 +224,24 @@ export interface PersonChairDetectionResult {
  */
 export interface WinnerDetectionResult {
     success: boolean;
-    winnerImage?: string; // URI of cropped winner image
+    winnerImage?: string; // URI of winner image (same as fullImage now)
     fullImage: string; // URI of full captured image
     confidence?: number;
     attempts: number;
+    winnerBbox?: { // Bounding box coordinates for UI overlay
+        x_center: number;
+        y_center: number;
+        width: number;
+        height: number;
+        pixelCoords: {
+            x1: number;
+            y1: number;
+            x2: number;
+            y2: number;
+        };
+    };
+    imageWidth?: number; // Original image dimensions for UI scaling
+    imageHeight?: number;
 }
 
 /**
@@ -645,6 +659,53 @@ export function validateTensor(tensor: ort.Tensor, description: string = "Tensor
 }
 
 /**
+ * Draws a winner bounding box on the image using ImageManipulator
+ * Uses a simple approach similar to person detection - by modifying the image data directly
+ * @param imageUri - Original image URI
+ * @param bbox - Bounding box coordinates (normalized 0-1)
+ * @param imageWidth - Original image width
+ * @param imageHeight - Original image height
+ * @param label - Label text to display (optional)
+ * @returns Promise<string> - URI of the image with bounding box drawn
+ */
+export async function drawWinnerBoundingBox(
+    imageUri: string,
+    bbox: { x_center: number; y_center: number; width: number; height: number },
+    imageWidth: number,
+    imageHeight: number,
+    label: string = "🏆 WINNER!"
+): Promise<string> {
+    try {
+        console.log(`🎨 Drawing winner bounding box on ${imageWidth}x${imageHeight} image`);
+        
+        // Convert normalized coordinates to pixel coordinates
+        const pixelCoords = convertToPixelCoords(bbox, imageWidth, imageHeight);
+        
+        console.log(`✅ Winner bounding box location identified`);
+        console.log(`📍 Winner location: center=(${bbox.x_center.toFixed(3)}, ${bbox.y_center.toFixed(3)}), size=(${bbox.width.toFixed(3)}, ${bbox.height.toFixed(3)})`);
+        console.log(`📐 Pixel coordinates: (${pixelCoords.x1}, ${pixelCoords.y1}) to (${pixelCoords.x2}, ${pixelCoords.y2})`);
+        
+        // Log bounding box information for UI to use (no image modification)
+        console.log(`🎯 Winner bounding box ready for UI overlay:`);
+        console.log(`   • Top-left: (${pixelCoords.x1}, ${pixelCoords.y1})`);
+        console.log(`   • Bottom-right: (${pixelCoords.x2}, ${pixelCoords.y2})`);
+        console.log(`   • Size: ${pixelCoords.pixelWidth}x${pixelCoords.pixelHeight}`);
+        console.log(`   • Label: ${label}`);
+        
+        // Return the original full image (no cropping or modification)
+        // The UI will use the bounding box coordinates to draw an overlay
+        console.log(`🏆 Returning original full image with winner coordinates logged`);
+        
+        return imageUri;
+
+        
+    } catch (error) {
+        console.error('Error processing winner bounding box:', error);
+        return imageUri; // Return original image if processing fails
+    }
+}
+
+/**
  * Creates a canvas image with bounding boxes drawn around detected persons
  * @param imageUri - Original image URI
  * @param detections - Detection results with bounding boxes
@@ -812,6 +873,9 @@ export async function cropImageToBoundingBox(
     padding: number = 0.1 // 10% padding around the bounding box
 ): Promise<string> {
     try {
+        console.log(`🔍 Cropping with bbox: center=(${bbox.x_center.toFixed(3)}, ${bbox.y_center.toFixed(3)}), size=(${bbox.width.toFixed(3)}, ${bbox.height.toFixed(3)})`);
+        console.log(`🔍 Image dimensions: ${imageWidth}x${imageHeight}`);
+        
         // Convert normalized coordinates to pixel coordinates
         const pixelCoords = convertToPixelCoords(bbox, imageWidth, imageHeight);
         
@@ -824,7 +888,7 @@ export async function cropImageToBoundingBox(
         const cropWidth = Math.min(imageWidth - cropX, pixelCoords.x2 - pixelCoords.x1 + 2 * paddingX);
         const cropHeight = Math.min(imageHeight - cropY, pixelCoords.y2 - pixelCoords.y1 + 2 * paddingY);
         
-        console.log(`🖼️ Cropping image: original=${imageWidth}x${imageHeight}, crop=${cropX},${cropY},${cropWidth}x${cropHeight}`);
+        console.log(`�️ Cropping: crop region=(${cropX}, ${cropY}, ${cropWidth}x${cropHeight}), bounds check: right=${cropX + cropWidth}/${imageWidth}, bottom=${cropY + cropHeight}/${imageHeight}`);
         
         const croppedImage = await ImageManipulator.manipulateAsync(
             imageUri,
@@ -936,13 +1000,19 @@ export async function detectWinner(
             let bestConfidence = 0;
             
             for (const person of detectionResults.persons) {
+                // Use YOLO coordinates directly (same as person detection)
+                // No coordinate conversion needed - YOLO outputs are already normalized correctly
+                
                 for (const chair of detectionResults.chairs) {
-                    // Convert to pixel coordinates for overlap calculation
+                    // Convert to pixel coordinates directly from YOLO normalized coordinates
                     const personPixel = convertToPixelCoords(person.bbox, imageWidth, imageHeight);
                     const chairPixel = convertToPixelCoords(chair.bbox, imageWidth, imageHeight);
                     
                     const overlap = calculateOverlap(personPixel, chairPixel);
-                    const distance = calculateCenterDistance(person, chair);
+                    const distance = calculateCenterDistance(
+                        { bbox: person.bbox }, 
+                        { bbox: chair.bbox }
+                    );
                     
                     console.log(`👤 Person (conf: ${person.confidence.toFixed(3)}) overlap with chair: ${overlap.toFixed(3)}, distance: ${distance.toFixed(3)}`);
                     
@@ -950,7 +1020,7 @@ export async function detectWinner(
                     if (overlap > bestOverlap || 
                         (overlap === bestOverlap && distance < bestDistance) ||
                         (overlap === bestOverlap && distance === bestDistance && person.confidence > bestConfidence)) {
-                        bestPerson = person;
+                        bestPerson = { ...person }; // Store original YOLO coordinates (no correction needed)
                         bestOverlap = overlap;
                         bestDistance = distance;
                         bestConfidence = person.confidence;
@@ -961,13 +1031,16 @@ export async function detectWinner(
             if (bestPerson && bestOverlap > 0.1) { // At least 10% overlap required
                 console.log(`🏆 Winner found! Overlap: ${bestOverlap.toFixed(3)}, Confidence: ${bestConfidence.toFixed(3)}`);
                 
-                // Crop the winner's image from the current successful capture
-                const winnerImage = await cropImageToBoundingBox(
+                // Get pixel coordinates for UI overlay (use original YOLO coordinates)
+                const pixelCoords = convertToPixelCoords(bestPerson.bbox, imageWidth, imageHeight);
+                
+                // Draw bounding box around the winner using original YOLO coordinates
+                const winnerImage = await drawWinnerBoundingBox(
                     picture.uri,
                     bestPerson.bbox,
                     imageWidth,
                     imageHeight,
-                    0.2 // 20% padding
+                    "🏆 WINNER!"
                 );
                 
                 return {
@@ -975,7 +1048,13 @@ export async function detectWinner(
                     winnerImage,
                     fullImage: picture.uri,
                     confidence: bestConfidence,
-                    attempts: attempt
+                    attempts: attempt,
+                    winnerBbox: {
+                        ...bestPerson.bbox,
+                        pixelCoords
+                    },
+                    imageWidth,
+                    imageHeight
                 };
             } else {
                 console.log(`⚠️ Attempt ${attempt}: No clear winner found (best overlap: ${bestOverlap.toFixed(3)})`);
@@ -997,5 +1076,57 @@ export async function detectWinner(
         success: false,
         fullImage: firstCapturedImage || '',
         attempts: maxRetries
+    };
+}
+
+/**
+ * Convert YOLO tensor coordinates back to original image coordinates
+ * This accounts for the letterboxing transformation applied during preprocessing
+ */
+export function convertYoloToOriginalCoords(
+    bbox: { x_center: number; y_center: number; width: number; height: number },
+    originalWidth: number,
+    originalHeight: number,
+    tensorSize: number = 640
+): { x_center: number; y_center: number; width: number; height: number } {
+    // Calculate the scale factor that was used during preprocessing
+    const scale = Math.min(tensorSize / originalWidth, tensorSize / originalHeight);
+    const scaledWidth = Math.round(originalWidth * scale);
+    const scaledHeight = Math.round(originalHeight * scale);
+    
+    // Calculate the offsets that were used to center the image in the tensor
+    const xOffset = Math.floor((tensorSize - scaledWidth) / 2);
+    const yOffset = Math.floor((tensorSize - scaledHeight) / 2);
+    
+    // Convert from tensor coordinates (0-1 relative to 640x640) to original image coordinates
+    // Step 1: Convert to pixel coordinates in the 640x640 tensor
+    const tensorX = bbox.x_center * tensorSize;
+    const tensorY = bbox.y_center * tensorSize;
+    const tensorW = bbox.width * tensorSize;
+    const tensorH = bbox.height * tensorSize;
+    
+    // Step 2: Remove the offset to get coordinates in the scaled image
+    const scaledX = tensorX - xOffset;
+    const scaledY = tensorY - yOffset;
+    
+    // Step 3: Scale back to original image coordinates
+    const originalX = scaledX / scale;
+    const originalY = scaledY / scale;
+    const originalW = tensorW / scale;
+    const originalH = tensorH / scale;
+    
+    // Step 4: Convert back to normalized coordinates relative to original image
+    const normalizedX = originalX / originalWidth;
+    const normalizedY = originalY / originalHeight;
+    const normalizedW = originalW / originalWidth;
+    const normalizedH = originalH / originalHeight;
+    
+    console.log(`🔄 Coord transform: ${bbox.x_center.toFixed(3)},${bbox.y_center.toFixed(3)} → ${normalizedX.toFixed(3)},${normalizedY.toFixed(3)} (scale=${scale.toFixed(3)}, offset=${xOffset},${yOffset})`);
+    
+    return {
+        x_center: normalizedX,
+        y_center: normalizedY,
+        width: normalizedW,
+        height: normalizedH
     };
 }
