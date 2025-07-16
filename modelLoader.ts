@@ -327,14 +327,7 @@ export function processOutputTensorToCountPersons(outputTensor: ort.Tensor): Det
     }));
     
     personCount = detections.length;
-    
-    // Log detection details
-    console.log(`🔍 Raw detections: ${rawDetections.length}, After NMS: ${personCount}`);
-    detections.forEach((det, idx) => {
-        console.log(`✅ Person ${idx + 1}: confidence=${det.confidence.toFixed(3)}, ` +
-                   `bbox=[${det.bbox.x_center.toFixed(3)}, ${det.bbox.y_center.toFixed(3)}, ${det.bbox.width.toFixed(3)}, ${det.bbox.height.toFixed(3)}]`);
-    });
-    
+        
     console.log(`📊 Detection Summary:`);
     console.log(`   • Total detections (>0.1 conf): ${totalDetections}`);
     console.log(`   • Person detections (>${threshold} conf): ${rawDetections.length}`);
